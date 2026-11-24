@@ -1,0 +1,6 @@
+{
+  "name": "INDIAN BIKE RIDER 3D",
+  "description": "A complete 3D Indian highway motorcycle driving game built with Three.js for desktop and mobile browsers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
