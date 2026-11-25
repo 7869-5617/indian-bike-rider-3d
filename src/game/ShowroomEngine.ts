@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { BIKE_CATALOG, createSportsBikeModel } from './bikes';
+import { BIKE_CATALOG, createSportsBikeModel, SportsBikeRig } from './bikes';
+import { clampAmbientIntensity, loadStoredAmbientIntensity } from './settings';
 import { BikeId } from './types';
 
 function detectSoftwareWebGL(): boolean {
@@ -72,7 +73,11 @@ export class ShowroomEngine {
   private resizeObserver: ResizeObserver | null = null;
 
   private heroBikes = new Map<BikeId, THREE.Group>();
+  private heroRigs = new Map<BikeId, SportsBikeRig>();
   private heroRingMat!: THREE.MeshStandardMaterial;
+  private hemiLight!: THREE.HemisphereLight;
+  private ambientLight!: THREE.AmbientLight;
+  private ambientIntensityMultiplier = loadStoredAmbientIntensity();
 
   private activeBikeId: BikeId;
   private transitionProgress = 1;
@@ -98,7 +103,7 @@ export class ShowroomEngine {
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.24;
+    this.renderer.toneMappingExposure = 0.92 + 0.32 * this.ambientIntensityMultiplier;
     this.renderer.setPixelRatio(
       this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio || 1, 2)
     );
@@ -287,8 +292,15 @@ export class ShowroomEngine {
 
   private buildLightingRig(): void {
     // Bright balanced ambient base
-    const hemi = new THREE.HemisphereLight(0xf1f5f9, 0x27272a, 1.25);
-    this.scene.add(hemi);
+    this.ambientLight = new THREE.AmbientLight(0xffffff, 0.22 * this.ambientIntensityMultiplier);
+    this.scene.add(this.ambientLight);
+
+    this.hemiLight = new THREE.HemisphereLight(
+      0xf1f5f9,
+      0x27272a,
+      1.25 * this.ambientIntensityMultiplier
+    );
+    this.scene.add(this.hemiLight);
 
     // Primary Key Light from front-right above
     const keyLight = new THREE.DirectionalLight(0xffffff, 2.5);
@@ -362,15 +374,25 @@ export class ShowroomEngine {
     neonRing.position.y = 0.15;
     this.scene.add(neonRing);
 
-    // Pre-build all 5 high-detail motorcycles ready to sit large & centered on the hero pedestal
+    // Pre-build both superbike rigs (async GLB loader with clean fallback) centered on the hero pedestal
     for (const spec of BIKE_CATALOG) {
-      const rig = createSportsBikeModel(spec.id, { withRider: false });
+      const rig = createSportsBikeModel(
+        spec.id,
+        { withRider: false },
+        () => {
+          if (!this.disposed && this.isSoftwareGl && this.activeBikeId === spec.id) {
+            this.controls.update();
+            this.renderer.render(this.scene, this.camera);
+          }
+        }
+      );
       rig.root.position.set(0, 0.2, 0);
       rig.root.scale.setScalar(HERO_SCALE);
       rig.root.rotation.y = HERO_BASE_YAW;
       rig.root.visible = spec.id === this.activeBikeId;
       this.scene.add(rig.root);
       this.heroBikes.set(spec.id, rig.root);
+      this.heroRigs.set(spec.id, rig);
     }
   }
 
@@ -409,6 +431,11 @@ export class ShowroomEngine {
 
   private applyActiveBikeVisibility(bikeId: BikeId, animate: boolean): void {
     this.activeBikeId = bikeId;
+    const accentHex = bikeId === 'ninja-zx6r' ? 0x22c55e : 0xef4444;
+    if (this.heroRingMat) {
+      this.heroRingMat.color.setHex(accentHex);
+      this.heroRingMat.emissive.setHex(accentHex);
+    }
     for (const [id, group] of this.heroBikes.entries()) {
       group.visible = id === bikeId;
       if (id === bikeId) {
@@ -431,6 +458,21 @@ export class ShowroomEngine {
     this.applyActiveBikeVisibility(bikeId, !this.isSoftwareGl);
     if (this.isSoftwareGl) {
       this.controls.update();
+      this.renderer.render(this.scene, this.camera);
+    }
+  }
+
+  public setAmbientIntensity(value: number): void {
+    const clamped = clampAmbientIntensity(value);
+    this.ambientIntensityMultiplier = clamped;
+    if (this.ambientLight) {
+      this.ambientLight.intensity = 0.22 * clamped;
+    }
+    if (this.hemiLight) {
+      this.hemiLight.intensity = 1.25 * clamped;
+    }
+    this.renderer.toneMappingExposure = 0.92 + 0.32 * clamped;
+    if (this.isSoftwareGl && !this.disposed) {
       this.renderer.render(this.scene, this.camera);
     }
   }
@@ -553,6 +595,12 @@ export class ShowroomEngine {
     this.controls.removeEventListener('end', this.handleOrbitEnd);
     this.controls.dispose();
     this.floorTexture.dispose();
+
+    for (const rig of this.heroRigs.values()) {
+      rig.dispose();
+    }
+    this.heroRigs.clear();
+    this.heroBikes.clear();
 
     this.scene.traverse((obj) => {
       if ((obj as THREE.Mesh).isMesh) {

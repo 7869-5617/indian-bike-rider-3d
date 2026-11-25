@@ -2,19 +2,16 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ProceduralTextures } from './textures';
 
-export interface PlayerBikeRig {
-  root: THREE.Group;
-  leanGroup: THREE.Group;
-  pitchGroup: THREE.Group;
-  steeringGroup: THREE.Group;
-  frontWheel: THREE.Group;
-  rearWheel: THREE.Group;
-  brakeLightMat: THREE.MeshStandardMaterial;
-}
-
 export interface TrafficRig {
   root: THREE.Group;
   wheels: THREE.Object3D[];
+  halfWidth: number;
+  halfLength: number;
+  height: number;
+}
+
+export interface StuntRampRig {
+  root: THREE.Group;
   halfWidth: number;
   halfLength: number;
   height: number;
@@ -100,371 +97,15 @@ function createWheel(
   return wheel;
 }
 
-export function createPlayerBike(textures: ProceduralTextures): PlayerBikeRig {
-  const root = new THREE.Group();
-  const leanGroup = new THREE.Group();
-  const pitchGroup = new THREE.Group();
-  root.add(leanGroup);
-  leanGroup.add(pitchGroup);
-
-  // Ground contact shadow (flat on asphalt under root)
-  const shadowGeo = new THREE.PlaneGeometry(1.4, 2.7);
-  const shadowMat = new THREE.MeshBasicMaterial({
-    map: textures.contactShadow,
-    transparent: true,
-    depthWrite: false,
-    opacity: 0.7,
-  });
-  const contactShadow = new THREE.Mesh(shadowGeo, shadowMat);
-  contactShadow.rotation.x = -Math.PI / 2;
-  contactShadow.position.y = 0.025;
-  root.add(contactShadow);
-
-  // Materials — Red & Black Sports Bike Palette
-  const redPaint = new THREE.MeshStandardMaterial({
-    color: 0xdc2626,
-    roughness: 0.16,
-    metalness: 0.42,
-  });
-  const darkCarbon = new THREE.MeshStandardMaterial({
-    color: 0x111827,
-    roughness: 0.55,
-    metalness: 0.25,
-  });
-  const satinFrame = new THREE.MeshStandardMaterial({
-    color: 0x1f2937,
-    roughness: 0.45,
-    metalness: 0.65,
-  });
-  const chromeMetal = new THREE.MeshStandardMaterial({
-    color: 0xe5e7eb,
-    roughness: 0.16,
-    metalness: 0.92,
-  });
-  const goldFork = new THREE.MeshStandardMaterial({
-    color: 0xd97706,
-    roughness: 0.22,
-    metalness: 0.85,
-  });
-  const visorGlass = new THREE.MeshStandardMaterial({
-    color: 0x09090b,
-    roughness: 0.12,
-    metalness: 0.85,
-  });
-  const headlightMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    emissive: 0xe0f2fe,
-    emissiveIntensity: 2.2,
-    roughness: 0.1,
-  });
-  const brakeLightMat = new THREE.MeshStandardMaterial({
-    color: 0x991b1b,
-    emissive: 0xef4444,
-    emissiveIntensity: 0.9,
-    roughness: 0.2,
-  });
-
-  // Rear Wheel (center y = 0.33, z = +0.76)
-  const rearWheel = createWheel(0.33, 0.105, 0x1f2937, 0xef4444);
-  rearWheel.position.set(0, 0.33, 0.76);
-  pitchGroup.add(rearWheel);
-
-  // Swingarm
-  const swingGeo = new THREE.BoxGeometry(0.05, 0.07, 0.72);
-  const swingL = new THREE.Mesh(swingGeo, satinFrame);
-  swingL.position.set(-0.14, 0.36, 0.44);
-  pitchGroup.add(swingL);
-  const swingR = swingL.clone();
-  swingR.position.x = 0.14;
-  pitchGroup.add(swingR);
-
-  // Engine Block & Crankcase
-  const engine = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.36, 0.48), satinFrame);
-  engine.position.set(0, 0.44, 0.02);
-  engine.castShadow = true;
-  pitchGroup.add(engine);
-
-  const engineFin = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.2, 0.36), darkCarbon);
-  engineFin.position.set(0, 0.42, 0.02);
-  pitchGroup.add(engineFin);
-
-  // Belly Pan (black aerodynamic lower fairing)
-  const bellyPan = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.68), darkCarbon);
-  bellyPan.position.set(0, 0.24, -0.05);
-  bellyPan.rotation.x = -0.1;
-  pitchGroup.add(bellyPan);
-
-  // Twin Upswept Exhaust Mufflers (chrome + carbon tips)
-  const exhaustGeo = new THREE.CylinderGeometry(0.042, 0.036, 0.65, 12);
-  for (const side of [-1, 1]) {
-    const pipe = new THREE.Mesh(exhaustGeo, chromeMetal);
-    pipe.rotation.x = Math.PI / 2 - 0.26;
-    pipe.position.set(side * 0.2, 0.38, 0.52);
-    pipe.castShadow = true;
-    pitchGroup.add(pipe);
-
-    const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.044, 0.12, 12), darkCarbon);
-    tip.rotation.x = Math.PI / 2 - 0.26;
-    tip.position.set(side * 0.2, 0.46, 0.82);
-    pitchGroup.add(tip);
-  }
-
-  // Sculpted Fuel Tank (ExtrudeGeometry silhouette)
-  const tankShape = new THREE.Shape();
-  tankShape.moveTo(-0.28, 0);
-  tankShape.quadraticCurveTo(-0.22, 0.24, 0.02, 0.26);
-  tankShape.quadraticCurveTo(0.24, 0.22, 0.28, 0.02);
-  tankShape.lineTo(-0.28, 0);
-
-  const tankGeo = new THREE.ExtrudeGeometry(tankShape, {
-    depth: 0.34,
-    bevelEnabled: true,
-    bevelThickness: 0.05,
-    bevelSize: 0.04,
-    bevelSegments: 3,
-  });
-  tankGeo.center();
-  const tank = new THREE.Mesh(tankGeo, redPaint);
-  tank.rotation.y = Math.PI / 2;
-  tank.position.set(0, 0.86, -0.14);
-  tank.castShadow = true;
-  pitchGroup.add(tank);
-
-  // Black Center Tank Stripe
-  const tankStripe = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.04, 0.46), darkCarbon);
-  tankStripe.position.set(0, 0.99, -0.14);
-  tankStripe.rotation.x = 0.08;
-  pitchGroup.add(tankStripe);
-
-  // Side Fairings (Red wings + Black accents)
-  for (const side of [-1, 1]) {
-    const sideWing = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.34, 0.56), redPaint);
-    sideWing.position.set(side * 0.2, 0.65, -0.24);
-    sideWing.rotation.x = -0.24;
-    sideWing.rotation.y = side * -0.08;
-    sideWing.castShadow = true;
-    pitchGroup.add(sideWing);
-
-    // Trellis Frame Strut
-    const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.46, 8), redPaint);
-    strut.rotation.x = Math.PI / 2 + 0.32;
-    strut.position.set(side * 0.17, 0.67, 0.14);
-    pitchGroup.add(strut);
-  }
-
-  // Sport Seat & Tail Cowl
-  const riderSeat = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.08, 0.38), darkCarbon);
-  riderSeat.position.set(0, 0.79, 0.26);
-  riderSeat.rotation.x = -0.1;
-  pitchGroup.add(riderSeat);
-
-  const tailCowl = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.14, 0.52), redPaint);
-  tailCowl.position.set(0, 0.86, 0.66);
-  tailCowl.rotation.x = -0.24;
-  tailCowl.castShadow = true;
-  pitchGroup.add(tailCowl);
-
-  // LED Taillight
-  const taillight = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.045, 0.04), brakeLightMat);
-  taillight.position.set(0, 0.91, 0.91);
-  pitchGroup.add(taillight);
-
-  // Rear Mudguard + License Plate
-  const plateBracket = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.22, 0.03), darkCarbon);
-  plateBracket.position.set(0, 0.73, 0.92);
-  plateBracket.rotation.x = 0.45;
-  pitchGroup.add(plateBracket);
-
-  const plate = new THREE.Mesh(
-    new THREE.BoxGeometry(0.16, 0.1, 0.015),
-    new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.4 })
-  );
-  plate.position.set(0, 0.66, 0.97);
-  plate.rotation.x = 0.45;
-  pitchGroup.add(plate);
-
-  // Front Steering Assembly (pivots around steering stem)
-  const steeringGroup = new THREE.Group();
-  steeringGroup.position.set(0, 0.78, -0.48);
-  pitchGroup.add(steeringGroup);
-
-  // Front Wheel (offset relative to steeringGroup so world position is y = 0.32, z = -0.78)
-  const frontWheel = createWheel(0.32, 0.095, 0x1f2937, 0xef4444);
-  frontWheel.position.set(0, 0.32 - 0.78, -0.3);
-  steeringGroup.add(frontWheel);
-
-  // Twin Inverted Forks
-  for (const side of [-1, 1]) {
-    const upperFork = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.42, 10), goldFork);
-    upperFork.position.set(side * 0.11, -0.02, -0.09);
-    upperFork.rotation.x = -0.45;
-    steeringGroup.add(upperFork);
-
-    const lowerFork = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.36, 10), chromeMetal);
-    lowerFork.position.set(side * 0.11, -0.3, -0.22);
-    lowerFork.rotation.x = -0.45;
-    steeringGroup.add(lowerFork);
-  }
-
-  // Front Fender (red)
-  const fender = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.34), redPaint);
-  fender.position.set(0, -0.22, -0.3);
-  fender.rotation.x = -0.25;
-  steeringGroup.add(fender);
-
-  // Nose Fairing & Twin LED Headlights
-  const nose = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.24, 0.36), redPaint);
-  nose.position.set(0, 0.12, -0.14);
-  nose.rotation.x = 0.22;
-  nose.castShadow = true;
-  steeringGroup.add(nose);
-
-  const windscreen = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.22, 0.03), visorGlass);
-  windscreen.position.set(0, 0.28, -0.14);
-  windscreen.rotation.x = 0.65;
-  steeringGroup.add(windscreen);
-
-  for (const side of [-1, 1]) {
-    const headlight = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.055, 0.04), headlightMat);
-    headlight.position.set(side * 0.09, 0.1, -0.32);
-    headlight.rotation.y = side * -0.18;
-    steeringGroup.add(headlight);
-  }
-
-  // Handlebars, Grips, Mirrors & Digital Dash
-  const tripleClamp = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.08), darkCarbon);
-  tripleClamp.position.set(0, 0.16, 0.02);
-  steeringGroup.add(tripleClamp);
-
-  const dash = new THREE.Mesh(
-    new THREE.BoxGeometry(0.16, 0.08, 0.02),
-    new THREE.MeshStandardMaterial({
-      color: 0x0f172a,
-      emissive: 0x38bdf8,
-      emissiveIntensity: 0.45,
-      roughness: 0.2,
-    })
-  );
-  dash.position.set(0, 0.22, -0.05);
-  dash.rotation.x = -0.45;
-  steeringGroup.add(dash);
-
-  for (const side of [-1, 1]) {
-    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.24, 8), darkCarbon);
-    bar.rotation.z = Math.PI / 2 - side * 0.14;
-    bar.rotation.y = side * 0.18;
-    bar.position.set(side * 0.21, 0.17, 0.04);
-    steeringGroup.add(bar);
-
-    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, 0.13, 10), redPaint);
-    grip.rotation.z = Math.PI / 2 - side * 0.14;
-    grip.rotation.y = side * 0.18;
-    grip.position.set(side * 0.28, 0.15, 0.06);
-    steeringGroup.add(grip);
-
-    const mirrorArm = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.14, 6), darkCarbon);
-    mirrorArm.position.set(side * 0.22, 0.27, -0.08);
-    mirrorArm.rotation.z = side * -0.5;
-    steeringGroup.add(mirrorArm);
-
-    const mirrorHead = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.045, 0.025), darkCarbon);
-    mirrorHead.position.set(side * 0.28, 0.33, -0.08);
-    steeringGroup.add(mirrorHead);
-  }
-
-  // Visible Helmeted Rider (Tucked Sport Posture)
-  const jacketMat = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.68, metalness: 0.1 });
-  const armorRed = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.45, metalness: 0.2 });
-  const jeansMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.82 });
-
-  const riderGroup = new THREE.Group();
-  pitchGroup.add(riderGroup);
-
-  // Pelvis & Torso leaning forward over tank
-  const pelvis = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.14, 0.22), jeansMat);
-  pelvis.position.set(0, 0.86, 0.27);
-  riderGroup.add(pelvis);
-
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.42, 0.22), jacketMat);
-  torso.position.set(0, 1.12, 0.11);
-  torso.rotation.x = 0.58;
-  torso.castShadow = true;
-  riderGroup.add(torso);
-
-  // Racing Red Back Hump & Chest Stripe
-  const backHump = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.24, 0.12), armorRed);
-  backHump.position.set(0, 1.16, 0.2);
-  backHump.rotation.x = 0.62;
-  riderGroup.add(backHump);
-
-  // Legs & Boots
-  for (const side of [-1, 1]) {
-    const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.068, 0.28, 4, 8), jeansMat);
-    thigh.position.set(side * 0.16, 0.77, 0.1);
-    thigh.rotation.x = 1.05;
-    thigh.rotation.z = side * -0.15;
-    riderGroup.add(thigh);
-
-    const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.28, 4, 8), jacketMat);
-    shin.position.set(side * 0.18, 0.56, 0.08);
-    shin.rotation.x = -0.35;
-    riderGroup.add(shin);
-
-    const boot = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.08, 0.22), darkCarbon);
-    boot.position.set(side * 0.18, 0.39, 0.18);
-    riderGroup.add(boot);
-
-    // Shoulder + Upper Arm + Forearm to Handlebar
-    const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 10), armorRed);
-    shoulder.position.set(side * 0.19, 1.24, -0.02);
-    riderGroup.add(shoulder);
-
-    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.048, 0.36, 4, 8), jacketMat);
-    arm.position.set(side * 0.24, 1.07, -0.22);
-    arm.rotation.x = 1.05;
-    arm.rotation.z = side * 0.14;
-    riderGroup.add(arm);
-
-    const glove = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 8), armorRed);
-    glove.position.set(side * 0.28, 0.93, -0.41);
-    riderGroup.add(glove);
-  }
-
-  // Racing Full-Face Helmet (Red & Black + Tinted Visor)
-  const helmetGroup = new THREE.Group();
-  helmetGroup.position.set(0, 1.39, -0.07);
-  riderGroup.add(helmetGroup);
-
-  const shell = new THREE.Mesh(new THREE.SphereGeometry(0.145, 18, 16), redPaint);
-  shell.scale.set(0.92, 1.02, 1.12);
-  shell.castShadow = true;
-  helmetGroup.add(shell);
-
-  const helmetStripe = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.22, 0.28), darkCarbon);
-  helmetStripe.position.set(0, 0.04, 0.01);
-  helmetGroup.add(helmetStripe);
-
-  const visor = new THREE.Mesh(new THREE.CylinderGeometry(0.138, 0.138, 0.095, 16, 1, false, -Math.PI * 0.42, Math.PI * 0.84), visorGlass);
-  visor.rotation.y = Math.PI;
-  visor.position.set(0, -0.005, -0.02);
-  helmetGroup.add(visor);
-
-  const chinGuard = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.08, 0.12), darkCarbon);
-  chinGuard.position.set(0, -0.08, -0.1);
-  helmetGroup.add(chinGuard);
-
-  return {
-    root,
-    leanGroup,
-    pitchGroup,
-    steeringGroup,
-    frontWheel,
-    rearWheel,
-    brakeLightMat,
-  };
-}
-
-export type TrafficKind = 'car' | 'auto' | 'bike' | 'truck';
+export type TrafficKind =
+  | 'car'
+  | 'auto'
+  | 'bike'
+  | 'truck'
+  | 'taxi'
+  | 'suv'
+  | 'bus'
+  | 'sportscar';
 
 export function createTrafficVehicle(
   kind: TrafficKind,
@@ -651,11 +292,19 @@ export function createTrafficVehicle(
     windshield.position.set(0, 1.7, -3.14);
     root.add(windshield);
 
-    const bumper = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.25, 0.2), darkTrim);
-    bumper.position.set(0, 0.42, 3.12);
-    root.add(bumper);
+    const frontBumper = new THREE.Mesh(new THREE.BoxGeometry(2.18, 0.26, 0.22), darkTrim);
+    frontBumper.position.set(0, 0.42, -3.14);
+    root.add(frontBumper);
+
+    const grille = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.56, 0.06), darkTrim);
+    grille.position.set(0, 0.92, -3.14);
+    root.add(grille);
 
     for (const side of [-1, 1]) {
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.22, 0.07), headlightMat);
+      head.position.set(side * 0.78, 0.72, -3.14);
+      root.add(head);
+
       const tail = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.16, 0.06), taillightMat);
       tail.position.set(side * 0.85, 0.65, 3.12);
       root.add(tail);
@@ -669,6 +318,261 @@ export function createTrafficVehicle(
     }
 
     return { root, wheels, halfWidth: 1.2, halfLength: 3.15, height: 2.8 };
+  }
+
+  if (kind === 'taxi') {
+    // Classic Indian Kaali-Peeli City Taxi (black body, yellow roof & illuminated TAXI sign)
+    const blackBody = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.25, metalness: 0.45 });
+    const yellowRoof = new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.28, metalness: 0.2 });
+    const taxiSignMat = new THREE.MeshStandardMaterial({
+      color: 0xfef08a,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 1.15,
+    });
+
+    const shadow = new THREE.Mesh(new THREE.PlaneGeometry(2.15, 4.3), shadowMat);
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = 0.022;
+    root.add(shadow);
+
+    const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.76, 0.56, 3.82), blackBody);
+    chassis.position.set(0, 0.54, 0);
+    chassis.castShadow = true;
+    chassis.receiveShadow = true;
+    root.add(chassis);
+
+    const sideStripe = new THREE.Mesh(new THREE.BoxGeometry(1.78, 0.1, 3.4), yellowRoof);
+    sideStripe.position.set(0, 0.62, 0);
+    root.add(sideStripe);
+
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.52, 1.92), yellowRoof);
+    cabin.position.set(0, 1.08, 0.16);
+    cabin.castShadow = true;
+    root.add(cabin);
+
+    const roofBeacon = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.16, 0.22), taxiSignMat);
+    roofBeacon.position.set(0, 1.42, -0.1);
+    root.add(roofBeacon);
+
+    const windshieldFront = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.4, 0.08), glassMat);
+    windshieldFront.position.set(0, 1.06, -0.78);
+    windshieldFront.rotation.x = 0.35;
+    root.add(windshieldFront);
+
+    const sideWindows = new THREE.Mesh(new THREE.BoxGeometry(1.51, 0.36, 1.52), glassMat);
+    sideWindows.position.set(0, 1.08, 0.16);
+    root.add(sideWindows);
+
+    for (const side of [-1, 1]) {
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.14, 0.06), taillightMat);
+      tail.position.set(side * 0.62, 0.64, 1.92);
+      root.add(tail);
+
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.14, 0.06), headlightMat);
+      head.position.set(side * 0.62, 0.6, -1.92);
+      root.add(head);
+
+      for (const zPos of [-1.16, 1.16]) {
+        const wheel = createWheel(0.31, 0.1, 0xd1d5db, null);
+        wheel.position.set(side * 0.85, 0.31, zPos);
+        root.add(wheel);
+        wheels.push(wheel);
+      }
+    }
+
+    return { root, wheels, halfWidth: 0.91, halfLength: 1.94, height: 1.48 };
+  }
+
+  if (kind === 'suv') {
+    const suvColors = [0xf8fafc, 0x1e293b, 0x3f3f46, 0x7c2d12, 0x065f46];
+    const bodyColor = suvColors[Math.floor(Math.random() * suvColors.length)];
+    const paintMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.22, metalness: 0.48 });
+    const chromeMat = new THREE.MeshStandardMaterial({ color: 0xd4d4d8, roughness: 0.2, metalness: 0.88 });
+
+    const shadow = new THREE.Mesh(new THREE.PlaneGeometry(2.35, 4.9), shadowMat);
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = 0.022;
+    root.add(shadow);
+
+    const lowerBody = new THREE.Mesh(new THREE.BoxGeometry(1.94, 0.72, 4.35), paintMat);
+    lowerBody.position.set(0, 0.72, 0);
+    lowerBody.castShadow = true;
+    lowerBody.receiveShadow = true;
+    root.add(lowerBody);
+
+    const upperCabin = new THREE.Mesh(new THREE.BoxGeometry(1.74, 0.68, 2.75), paintMat);
+    upperCabin.position.set(0, 1.4, 0.38);
+    upperCabin.castShadow = true;
+    root.add(upperCabin);
+
+    const glassBand = new THREE.Mesh(new THREE.BoxGeometry(1.78, 0.48, 2.45), glassMat);
+    glassBand.position.set(0, 1.38, 0.38);
+    root.add(glassBand);
+
+    const windshield = new THREE.Mesh(new THREE.BoxGeometry(1.66, 0.54, 0.08), glassMat);
+    windshield.position.set(0, 1.36, -0.98);
+    windshield.rotation.x = 0.32;
+    root.add(windshield);
+
+    const bullBar = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.24, 0.14), chromeMat);
+    bullBar.position.set(0, 0.56, -2.22);
+    root.add(bullBar);
+
+    const rearSpare = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.2, 16), darkTrim);
+    rearSpare.rotation.x = Math.PI / 2;
+    rearSpare.position.set(0, 0.96, 2.24);
+    root.add(rearSpare);
+
+    for (const side of [-1, 1]) {
+      const roofRail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 2.3), chromeMat);
+      roofRail.position.set(side * 0.72, 1.78, 0.38);
+      root.add(roofRail);
+
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.06), headlightMat);
+      head.position.set(side * 0.68, 0.78, -2.18);
+      root.add(head);
+
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.22, 0.06), taillightMat);
+      tail.position.set(side * 0.72, 0.84, 2.18);
+      root.add(tail);
+
+      for (const zPos of [-1.38, 1.38]) {
+        const wheel = createWheel(0.39, 0.125, 0x9ca3af, null);
+        wheel.position.set(side * 0.94, 0.39, zPos);
+        root.add(wheel);
+        wheels.push(wheel);
+      }
+    }
+
+    return { root, wheels, halfWidth: 1.0, halfLength: 2.24, height: 1.82 };
+  }
+
+  if (kind === 'bus') {
+    const busThemes = [
+      { body: 0xdc2626, stripe: 0xfef3c7 },
+      { body: 0x1d4ed8, stripe: 0xe2e8f0 },
+      { body: 0x0f766e, stripe: 0xfde047 },
+    ];
+    const theme = busThemes[Math.floor(Math.random() * busThemes.length)];
+    const bodyMat = new THREE.MeshStandardMaterial({ color: theme.body, roughness: 0.32, metalness: 0.28 });
+    const stripeMat = new THREE.MeshStandardMaterial({ color: theme.stripe, roughness: 0.4 });
+
+    const shadow = new THREE.Mesh(new THREE.PlaneGeometry(2.9, 8.6), shadowMat);
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = 0.022;
+    root.add(shadow);
+
+    const coachBody = new THREE.Mesh(new THREE.BoxGeometry(2.34, 2.42, 7.8), bodyMat);
+    coachBody.position.set(0, 1.66, 0);
+    coachBody.castShadow = true;
+    coachBody.receiveShadow = true;
+    root.add(coachBody);
+
+    const liveryStripe = new THREE.Mesh(new THREE.BoxGeometry(2.38, 0.34, 7.82), stripeMat);
+    liveryStripe.position.set(0, 1.18, 0);
+    root.add(liveryStripe);
+
+    const sideWindows = new THREE.Mesh(new THREE.BoxGeometry(2.38, 0.78, 6.7), glassMat);
+    sideWindows.position.set(0, 2.08, 0.15);
+    root.add(sideWindows);
+
+    const frontGlass = new THREE.Mesh(new THREE.BoxGeometry(2.14, 1.15, 0.08), glassMat);
+    frontGlass.position.set(0, 2.0, -3.91);
+    root.add(frontGlass);
+
+    const acPod = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.26, 2.4), stripeMat);
+    acPod.position.set(0, 2.98, -0.35);
+    root.add(acPod);
+
+    const bumper = new THREE.Mesh(new THREE.BoxGeometry(2.36, 0.28, 0.16), darkTrim);
+    bumper.position.set(0, 0.5, -3.92);
+    root.add(bumper);
+
+    for (const side of [-1, 1]) {
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.2, 0.07), headlightMat);
+      head.position.set(side * 0.84, 0.78, -3.91);
+      root.add(head);
+
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.24, 0.07), taillightMat);
+      tail.position.set(side * 0.86, 0.84, 3.91);
+      root.add(tail);
+
+      for (const zPos of [-2.45, 2.15]) {
+        const wheel = createWheel(0.46, 0.14, 0x4b5563, null);
+        wheel.position.set(side * 1.14, 0.46, zPos);
+        root.add(wheel);
+        wheels.push(wheel);
+      }
+    }
+
+    return { root, wheels, halfWidth: 1.22, halfLength: 3.95, height: 3.12 };
+  }
+
+  if (kind === 'sportscar') {
+    const coupeColors = [0xe11d48, 0xf59e0b, 0x0284c7, 0x7c3aed, 0x10b981];
+    const bodyColor = coupeColors[Math.floor(Math.random() * coupeColors.length)];
+    const paintMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.12, metalness: 0.62 });
+    const stripeMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.22, metalness: 0.35 });
+
+    const shadow = new THREE.Mesh(new THREE.PlaneGeometry(2.25, 4.4), shadowMat);
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = 0.022;
+    root.add(shadow);
+
+    const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.88, 0.44, 4.05), paintMat);
+    chassis.position.set(0, 0.46, 0);
+    chassis.castShadow = true;
+    chassis.receiveShadow = true;
+    root.add(chassis);
+
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.44, 0.42, 1.72), paintMat);
+    cabin.position.set(0, 0.86, 0.15);
+    cabin.castShadow = true;
+    root.add(cabin);
+
+    const racingStripe = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.03, 3.9), stripeMat);
+    racingStripe.position.set(0, 0.695, 0);
+    root.add(racingStripe);
+
+    const windshieldFront = new THREE.Mesh(new THREE.BoxGeometry(1.36, 0.36, 0.08), glassMat);
+    windshieldFront.position.set(0, 0.86, -0.76);
+    windshieldFront.rotation.x = 0.52;
+    root.add(windshieldFront);
+
+    const sideWindows = new THREE.Mesh(new THREE.BoxGeometry(1.47, 0.28, 1.38), glassMat);
+    sideWindows.position.set(0, 0.86, 0.15);
+    root.add(sideWindows);
+
+    const spoilerWing = new THREE.Mesh(new THREE.BoxGeometry(1.82, 0.06, 0.28), darkTrim);
+    spoilerWing.position.set(0, 0.88, 1.84);
+    root.add(spoilerWing);
+
+    const splitter = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.07, 0.25), darkTrim);
+    splitter.position.set(0, 0.22, -1.98);
+    root.add(splitter);
+
+    for (const side of [-1, 1]) {
+      const strut = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.22, 0.14), darkTrim);
+      strut.position.set(side * 0.56, 0.76, 1.84);
+      root.add(strut);
+
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.1, 0.06), headlightMat);
+      head.position.set(side * 0.66, 0.52, -2.03);
+      root.add(head);
+
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.1, 0.06), taillightMat);
+      tail.position.set(side * 0.62, 0.56, 2.03);
+      root.add(tail);
+
+      for (const zPos of [-1.22, 1.22]) {
+        const wheel = createWheel(0.32, 0.105, 0x18181b, 0xef4444);
+        wheel.position.set(side * 0.9, 0.32, zPos);
+        root.add(wheel);
+        wheels.push(wheel);
+      }
+    }
+
+    return { root, wheels, halfWidth: 0.96, halfLength: 2.05, height: 1.18 };
   }
 
   // AI Commuter Motorcycle + Helmeted Rider
@@ -813,6 +717,129 @@ export function createObstacle(
   }
 
   return { root, wheels: [], halfWidth: 0.78, halfLength: 0.25, height: 0.7 };
+}
+
+export function createStuntRamp(textures: ProceduralTextures): StuntRampRig {
+  const root = new THREE.Group();
+  const width = 2.85;
+  const length = 7.0;
+  const height = 1.45;
+
+  const steelMat = new THREE.MeshStandardMaterial({
+    color: 0x334155,
+    roughness: 0.45,
+    metalness: 0.65,
+  });
+  const deckMat = new THREE.MeshStandardMaterial({
+    map: textures.rampSurface,
+    roughness: 0.5,
+    metalness: 0.25,
+  });
+  const lipGlowMat = new THREE.MeshStandardMaterial({
+    color: 0xfef08a,
+    emissive: 0xf59e0b,
+    emissiveIntensity: 1.5,
+    roughness: 0.2,
+  });
+
+  // Ground shadow under ramp
+  const shadow = new THREE.Mesh(
+    new THREE.PlaneGeometry(width + 0.5, length + 0.6),
+    new THREE.MeshBasicMaterial({
+      map: textures.contactShadow,
+      transparent: true,
+      depthWrite: false,
+      opacity: 0.55,
+    })
+  );
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.022;
+  root.add(shadow);
+
+  // Extruded wedge side profile: approach at +Z (player rides in -Z direction up from +Z to -Z!)
+  // Side profile X = -z (so -length/2 is high lip, +length/2 is low entry)
+  const wedgeShape = new THREE.Shape();
+  wedgeShape.moveTo(-length / 2, 0);
+  wedgeShape.lineTo(length / 2, 0);
+  wedgeShape.lineTo(length / 2, height);
+  wedgeShape.lineTo(-length / 2, 0.04);
+  wedgeShape.closePath();
+
+  const wedgeGeo = new THREE.ExtrudeGeometry(wedgeShape, {
+    depth: width,
+    bevelEnabled: false,
+  });
+  wedgeGeo.center();
+  // Rotate so X-axis of shape maps onto -Z (low entry at +length/2, high launch lip at -length/2)
+  const wedgeMesh = new THREE.Mesh(wedgeGeo, steelMat);
+  wedgeMesh.rotation.y = Math.PI / 2;
+  wedgeMesh.position.y = height / 2;
+  wedgeMesh.castShadow = true;
+  wedgeMesh.receiveShadow = true;
+  root.add(wedgeMesh);
+
+  // Sloped top deck with chevron launch markings
+  const slopeLen = Math.hypot(length, height);
+  const slopeAngle = Math.atan2(height, length);
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(width + 0.04, 0.08, slopeLen), deckMat);
+  deck.position.set(0, height / 2 + 0.02, 0);
+  deck.rotation.x = slopeAngle;
+  deck.receiveShadow = true;
+  root.add(deck);
+
+  // Glowing amber launch lip bar & approach markers
+  const lipBar = new THREE.Mesh(new THREE.BoxGeometry(width + 0.08, 0.1, 0.16), lipGlowMat);
+  lipBar.position.set(0, height + 0.04, -length / 2 + 0.08);
+  root.add(lipBar);
+
+  for (const side of [-1, 1]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.32, 0.1), lipGlowMat);
+    post.position.set(side * (width / 2 + 0.05), height + 0.16, -length / 2 + 0.08);
+    root.add(post);
+  }
+
+  return {
+    root,
+    halfWidth: width / 2,
+    halfLength: length / 2,
+    height,
+  };
+}
+
+export function createGoldenCoin(): THREE.Group {
+  const coin = new THREE.Group();
+
+  const goldMat = new THREE.MeshStandardMaterial({
+    color: 0xfacc15,
+    emissive: 0xb45309,
+    emissiveIntensity: 0.35,
+    roughness: 0.18,
+    metalness: 0.9,
+  });
+  const innerMat = new THREE.MeshStandardMaterial({
+    color: 0xfef08a,
+    emissive: 0xf59e0b,
+    emissiveIntensity: 0.45,
+    roughness: 0.22,
+    metalness: 0.85,
+  });
+
+  // Main disc standing vertically facing +Z/-Z
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.1, 20), goldMat);
+  disc.rotation.x = Math.PI / 2;
+  disc.castShadow = true;
+  coin.add(disc);
+
+  // Raised outer rim
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.39, 0.055, 8, 22), goldMat);
+  coin.add(rim);
+
+  // Inner embossed emblem boss on both faces
+  const emblem = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 0.125), innerMat);
+  emblem.rotation.z = Math.PI / 4;
+  coin.add(emblem);
+
+  return coin;
 }
 
 export interface ChunkMaterials {

@@ -4,20 +4,27 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  CloudFog,
+  CloudRain,
   Coins,
+  Flame,
   Gamepad2,
   Lock,
   Pause,
   Play,
   RotateCcw,
+  Settings,
   ShoppingBag,
   Sparkles,
+  Sun,
   Target,
   Trophy,
   Volume2,
   VolumeX,
   X,
+  Zap,
 } from 'lucide-react';
+import { SpeedometerGauge } from './components/SpeedometerGauge';
 import { BikeGameEngine } from './game/BikeGameEngine';
 import {
   BIKE_CATALOG,
@@ -39,25 +46,45 @@ import {
 } from './game/missions';
 import { ShowroomEngine } from './game/ShowroomEngine';
 import {
+  clampAmbientIntensity,
+  DEFAULT_AMBIENT_INTENSITY,
+  loadStoredAmbientIntensity,
+  MAX_AMBIENT_INTENSITY,
+  MIN_AMBIENT_INTENSITY,
+  saveStoredAmbientIntensity,
+} from './game/settings';
+import {
   BikeId,
   BikeSpec,
   DailyMissionsSnapshot,
   GameState,
   GameTelemetry,
   InputState,
+  WeatherMode,
 } from './game/types';
+import { loadStoredWeather, saveStoredWeather, WEATHER_OPTIONS } from './game/weather';
 
 const INITIAL_TELEMETRY: GameTelemetry = {
   speedKmh: 0,
   peakSpeedKmh: 0,
+  maxBikeSpeedKmh: 260,
   distanceM: 0,
   highSpeedDistanceM: 0,
   score: 0,
+  stuntScore: 0,
   bestScore: 0,
   coins: 0,
   runCoinsEarned: 0,
+  coinsCollectedInRun: 0,
   difficultyLevel: 1,
   nearMisses: 0,
+  flipsInRun: 0,
+  wheelieActive: false,
+  isAirborne: false,
+  nitroLevel: 100,
+  nitroActive: false,
+  hasNitro: false,
+  stuntCallout: null,
   isNewBest: false,
   gear: 1,
 };
@@ -107,6 +134,12 @@ export default function App() {
     coins: loadStoredCoins(),
   }));
   const [muted, setMuted] = useState(false);
+  const [weather, setWeather] = useState<WeatherMode>(() => loadStoredWeather());
+  const [ambientIntensity, setAmbientIntensity] = useState<number>(() =>
+    loadStoredAmbientIntensity()
+  );
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const showSettingsModalRef = useRef(false);
   const [showTouchControls, setShowTouchControls] = useState(false);
   const [showAccelHint, setShowAccelHint] = useState(false);
   const [contextNotice, setContextNotice] = useState<string | null>(null);
@@ -116,6 +149,8 @@ export default function App() {
     brake: false,
     left: false,
     right: false,
+    wheelie: false,
+    nitro: false,
   });
 
   useEffect(() => {
@@ -137,6 +172,10 @@ export default function App() {
   useEffect(() => {
     showMissionsModalRef.current = showMissionsModal;
   }, [showMissionsModal]);
+
+  useEffect(() => {
+    showSettingsModalRef.current = showSettingsModal;
+  }, [showSettingsModal]);
 
   // Detect touch-capable or compact viewports for automatic mobile controls
   useEffect(() => {
@@ -201,7 +240,14 @@ export default function App() {
           notifyNewlyCompleted(evalRes.newlyCompleted, engine);
         }
         setGameState('gameover');
-        setActiveTouch({ accelerate: false, brake: false, left: false, right: false });
+        setActiveTouch({
+          accelerate: false,
+          brake: false,
+          left: false,
+          right: false,
+          wheelie: false,
+          nitro: false,
+        });
       },
       onContextError: (msg) => {
         setContextNotice(msg);
@@ -297,6 +343,13 @@ export default function App() {
         case 'KeyD':
         case 'ArrowRight':
           return 'right';
+        case 'ShiftLeft':
+        case 'ShiftRight':
+        case 'KeyE':
+          return 'wheelie';
+        case 'KeyN':
+        case 'KeyF':
+          return 'nitro';
         default:
           return null;
       }
@@ -311,6 +364,13 @@ export default function App() {
         e.code === 'Space'
       ) {
         e.preventDefault();
+      }
+
+      if (showSettingsModalRef.current && e.code === 'Escape') {
+        if (e.repeat) return;
+        engineRef.current?.sound.playClick();
+        setShowSettingsModal(false);
+        return;
       }
 
       if (showMissionsModalRef.current && e.code === 'Escape') {
@@ -365,7 +425,14 @@ export default function App() {
 
     const handleBlur = () => {
       engineRef.current?.clearInput();
-      setActiveTouch({ accelerate: false, brake: false, left: false, right: false });
+      setActiveTouch({
+        accelerate: false,
+        brake: false,
+        left: false,
+        right: false,
+        wheelie: false,
+        nitro: false,
+      });
     };
 
     window.addEventListener('keydown', handleKeyDown, { passive: false });
@@ -384,6 +451,7 @@ export default function App() {
     engine.sound.playClick();
     setContextNotice(null);
     setShowMissionsModal(false);
+    setShowSettingsModal(false);
     setMissionBanner(null);
     const syncedMissions = loadDailyMissions();
     dailyMissionsRef.current = syncedMissions;
@@ -397,6 +465,7 @@ export default function App() {
       engineRef.current?.sound.unlock();
       engineRef.current?.sound.playClick();
       setShowMissionsModal(false);
+      setShowSettingsModal(false);
       showroomReturnTargetRef.current = from;
       setFocusedBikeId(selectedBikeId);
       setGameState('showroom');
@@ -407,10 +476,18 @@ export default function App() {
   const handleOpenMissions = useCallback(() => {
     engineRef.current?.sound.unlock();
     engineRef.current?.sound.playClick();
+    setShowSettingsModal(false);
     const fresh = loadDailyMissions();
     dailyMissionsRef.current = fresh;
     setDailyMissions(fresh);
     setShowMissionsModal(true);
+  }, []);
+
+  const handleOpenSettings = useCallback(() => {
+    engineRef.current?.sound.unlock();
+    engineRef.current?.sound.playClick();
+    setShowMissionsModal(false);
+    setShowSettingsModal(true);
   }, []);
 
   const handleClaimMission = useCallback((missionId: string) => {
@@ -494,7 +571,14 @@ export default function App() {
     dailyMissionsRef.current = syncedMissions;
     setDailyMissions(syncedMissions);
     engine.startGame();
-    setActiveTouch({ accelerate: false, brake: false, left: false, right: false });
+    setActiveTouch({
+      accelerate: false,
+      brake: false,
+      left: false,
+      right: false,
+      wheelie: false,
+      nitro: false,
+    });
     setGameState('playing');
   }, [focusedBikeId, ownedBikes, selectedBikeId]);
 
@@ -503,7 +587,14 @@ export default function App() {
     if (!engine || gameStateRef.current !== 'playing') return;
     engine.sound.playClick();
     engine.pauseGame();
-    setActiveTouch({ accelerate: false, brake: false, left: false, right: false });
+    setActiveTouch({
+      accelerate: false,
+      brake: false,
+      left: false,
+      right: false,
+      wheelie: false,
+      nitro: false,
+    });
     setGameState('paused');
   }, []);
 
@@ -526,7 +617,14 @@ export default function App() {
     dailyMissionsRef.current = syncedMissions;
     setDailyMissions(syncedMissions);
     engine.startGame();
-    setActiveTouch({ accelerate: false, brake: false, left: false, right: false });
+    setActiveTouch({
+      accelerate: false,
+      brake: false,
+      left: false,
+      right: false,
+      wheelie: false,
+      nitro: false,
+    });
     setGameState('playing');
   }, []);
 
@@ -537,7 +635,14 @@ export default function App() {
     setShowMissionsModal(false);
     setMissionBanner(null);
     engine.returnToMenu();
-    setActiveTouch({ accelerate: false, brake: false, left: false, right: false });
+    setActiveTouch({
+      accelerate: false,
+      brake: false,
+      left: false,
+      right: false,
+      wheelie: false,
+      nitro: false,
+    });
     setGameState('menu');
   }, []);
 
@@ -550,6 +655,28 @@ export default function App() {
     if (!nextMuted) {
       engine.sound.playClick();
     }
+  }, []);
+
+  const handleSelectWeather = useCallback((nextWeather: WeatherMode) => {
+    engineRef.current?.sound.unlock();
+    engineRef.current?.sound.playClick();
+    saveStoredWeather(nextWeather);
+    setWeather(nextWeather);
+    engineRef.current?.setWeather(nextWeather);
+  }, []);
+
+  const handleCycleWeather = useCallback(() => {
+    const idx = WEATHER_OPTIONS.findIndex((o) => o.id === weather);
+    const next = WEATHER_OPTIONS[(idx + 1) % WEATHER_OPTIONS.length].id;
+    handleSelectWeather(next);
+  }, [handleSelectWeather, weather]);
+
+  const handleChangeAmbientIntensity = useCallback((nextValue: number) => {
+    const clamped = clampAmbientIntensity(nextValue);
+    saveStoredAmbientIntensity(clamped);
+    setAmbientIntensity(clamped);
+    engineRef.current?.setAmbientIntensity(clamped);
+    showroomRef.current?.setAmbientIntensity(clamped);
   }, []);
 
   const bindTouchControl = (control: keyof InputState) => ({
@@ -592,10 +719,6 @@ export default function App() {
   const isFocusedOwned = ownedBikes.includes(focusedBikeSpec.id);
   const isFocusedSelected = selectedBikeId === focusedBikeSpec.id;
   const canAffordFocused = coins >= focusedBikeSpec.price;
-  const speedPct = Math.min(
-    100,
-    Math.round((telemetry.speedKmh / Math.max(equippedBikeSpec.topSpeedKmh, 220)) * 100)
-  );
 
   const completedMissionCount = dailyMissions.missions.filter((m) => m.completed).length;
   const claimableMissions = dailyMissions.missions.filter((m) => m.completed && !m.claimed);
@@ -638,36 +761,37 @@ export default function App() {
       {/* IN-GAME HUD */}
       {(gameState === 'playing' || gameState === 'paused') && (
         <div className="absolute inset-0 z-20 pointer-events-none">
-          {/* Top Bar: Score/Distance + Daily Tracker (Left), Compact Speed (Mobile Center), Actions (Right) */}
-          <div className="flex items-start justify-between gap-2 p-3 sm:p-4">
+          {/* Top Bar: Score/Distance + Daily Tracker (Left), Compact Circular Gauge (Mobile Center), Actions (Right) */}
+          <div className="flex items-start justify-between gap-1.5 sm:gap-2 p-2.5 sm:p-4">
             {/* Left Column: Score/Distance Cluster + Compact Daily Mission Tracker */}
             <div className="flex flex-col items-start gap-2.5">
-              <div className="pointer-events-auto bg-zinc-950/90 border border-white/10 rounded-xl px-3.5 py-2 sm:px-4 sm:py-2.5 shadow-lg">
-                <div className="flex items-baseline gap-3 sm:gap-5">
+              <div className="pointer-events-auto bg-zinc-950/90 border border-white/10 rounded-xl px-2.5 py-1.5 sm:px-4 sm:py-2.5 shadow-lg">
+                <div className="flex items-baseline gap-2.5 sm:gap-5">
                   <div>
-                    <div className="text-[10px] font-semibold tracking-wider text-zinc-400">
+                    <div className="text-[9px] sm:text-[10px] font-semibold tracking-wider text-zinc-400">
                       SCORE
                     </div>
-                    <div className="font-display text-lg sm:text-2xl font-bold text-white tabular-nums leading-tight">
+                    <div className="font-display text-base sm:text-2xl font-bold text-white tabular-nums leading-tight">
                       {telemetry.score.toLocaleString()}
                     </div>
                   </div>
-                  <div className="h-7 w-px bg-white/10" aria-hidden="true" />
+                  <div className="h-6 sm:h-7 w-px bg-white/10" aria-hidden="true" />
                   <div>
-                    <div className="text-[10px] font-semibold tracking-wider text-zinc-400">
+                    <div className="text-[9px] sm:text-[10px] font-semibold tracking-wider text-zinc-400">
                       DISTANCE
                     </div>
-                    <div className="font-display text-base sm:text-xl font-bold text-red-400 tabular-nums leading-tight">
+                    <div className="font-display text-sm sm:text-xl font-bold text-red-400 tabular-nums leading-tight">
                       {formatDistance(telemetry.distanceM)}
                     </div>
                   </div>
                   <div className="hidden sm:block h-7 w-px bg-white/10" aria-hidden="true" />
                   <div className="hidden sm:block">
-                    <div className="text-[10px] font-semibold tracking-wider text-zinc-400">
-                      STAGE
+                    <div className="text-[10px] font-semibold tracking-wider text-amber-400/90">
+                      COINS
                     </div>
-                    <div className="font-display text-xl font-bold text-zinc-200 tabular-nums leading-tight">
-                      L{telemetry.difficultyLevel}
+                    <div className="font-display text-xl font-bold text-amber-300 tabular-nums leading-tight flex items-center gap-1">
+                      <Coins className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>{telemetry.coins.toLocaleString()}</span>
                     </div>
                   </div>
                 </div>
@@ -710,24 +834,22 @@ export default function App() {
               )}
             </div>
 
-            {/* Compact Mobile Speedometer (Top-Center on <768px so bottom thumb pads stay unobstructed) */}
-            <div className="md:hidden bg-zinc-950/90 border border-white/10 rounded-xl px-3 py-1.5 shadow-lg text-center min-w-[96px]">
-              <div className="font-display text-xl font-bold text-white tabular-nums leading-none">
-                {telemetry.speedKmh}
-              </div>
-              <div className="text-[9px] font-semibold tracking-wider text-red-400 mt-0.5">
-                KM/H · G{telemetry.gear}
-              </div>
-              <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden mt-1">
-                <div
-                  className="h-full bg-red-500 transition-[width] duration-75"
-                  style={{ width: `${speedPct}%` }}
-                />
-              </div>
+            {/* Compact Mobile Circular Speedometer Gauge (Top-Center on <768px) */}
+            <div className="md:hidden shrink-0">
+              <SpeedometerGauge
+                compact
+                speedKmh={telemetry.speedKmh}
+                maxSpeedKmh={equippedBikeSpec.topSpeedKmh}
+                gear={telemetry.gear}
+                bikeName={equippedBikeSpec.name}
+                hasNitro={telemetry.hasNitro}
+                nitroLevel={telemetry.nitroLevel}
+                nitroActive={telemetry.nitroActive}
+              />
             </div>
 
             {/* Top-Right Functional Controls */}
-            <div className="pointer-events-auto flex items-center gap-2">
+            <div className="pointer-events-auto flex items-center gap-1.5 sm:gap-2">
               <button
                 type="button"
                 onClick={() => {
@@ -747,18 +869,44 @@ export default function App() {
 
               <button
                 type="button"
+                data-testid="hud-weather-btn"
+                onClick={handleCycleWeather}
+                aria-label={`Weather: ${weather}. Click to switch`}
+                title={`Weather: ${weather.charAt(0).toUpperCase() + weather.slice(1)} (click to change)`}
+                className={`inline-flex items-center justify-center gap-1.5 w-10 h-10 sm:w-auto sm:h-11 sm:px-3 rounded-xl border transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-red-500 ${
+                  weather === 'rain'
+                    ? 'bg-sky-950/90 border-sky-400/50 text-sky-300 hover:border-sky-300'
+                    : weather === 'fog'
+                      ? 'bg-slate-900/90 border-slate-400/50 text-slate-200 hover:border-slate-300'
+                      : 'bg-zinc-950/90 border-white/10 text-amber-300 hover:border-white/25'
+                }`}
+              >
+                {weather === 'rain' ? (
+                  <CloudRain className="w-4 h-4 shrink-0" />
+                ) : weather === 'fog' ? (
+                  <CloudFog className="w-4 h-4 shrink-0" />
+                ) : (
+                  <Sun className="w-4 h-4 shrink-0" />
+                )}
+                <span className="hidden md:inline text-xs font-semibold capitalize">
+                  {weather}
+                </span>
+              </button>
+
+              <button
+                type="button"
                 onClick={handleToggleMute}
                 aria-label={muted ? 'Unmute audio' : 'Mute audio'}
-                className="inline-flex items-center justify-center w-11 h-11 rounded-xl bg-zinc-950/90 border border-white/10 text-zinc-200 hover:text-white hover:border-white/25 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-red-500"
+                className="inline-flex items-center justify-center w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-zinc-950/90 border border-white/10 text-zinc-200 hover:text-white hover:border-white/25 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-red-500"
               >
-                {muted ? <VolumeX className="w-5 h-5 text-red-400" /> : <Volume2 className="w-5 h-5" />}
+                {muted ? <VolumeX className="w-4 h-4 sm:w-5 sm:h-5 text-red-400" /> : <Volume2 className="w-4 h-4 sm:w-5 sm:h-5" />}
               </button>
 
               <button
                 type="button"
                 onClick={handlePause}
                 aria-label="Pause game"
-                className="inline-flex items-center justify-center gap-2 h-11 px-3.5 rounded-xl bg-zinc-950/90 border border-white/10 text-white font-semibold text-sm hover:border-red-500/60 hover:bg-zinc-900 transition-colors cursor-pointer whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-red-500"
+                className="inline-flex items-center justify-center gap-2 w-10 h-10 sm:w-auto sm:h-11 sm:px-3.5 rounded-xl bg-zinc-950/90 border border-white/10 text-white font-semibold text-sm hover:border-red-500/60 hover:bg-zinc-900 transition-colors cursor-pointer whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-red-500"
               >
                 <Pause className="w-4 h-4 text-red-500" />
                 <span className="hidden sm:inline">Pause</span>
@@ -785,54 +933,41 @@ export default function App() {
             </div>
           )}
 
+          {/* Live Stunt / Wheelie / Air-Flip Callout */}
+          {telemetry.stuntCallout && gameState === 'playing' && (
+            <div
+              data-testid="hud-stunt-callout"
+              className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 px-4 py-1.5 rounded-xl bg-zinc-950/92 border border-amber-400/50 shadow-xl text-center whitespace-nowrap"
+            >
+              <span className="font-display text-sm sm:text-base font-bold tracking-wider text-amber-300">
+                {telemetry.stuntCallout}
+              </span>
+            </div>
+          )}
+
           {/* Gentle acceleration prompt when stationary */}
           {showAccelHint && gameState === 'playing' && (
-            <div className="absolute top-28 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg bg-zinc-950/90 border border-red-500/40 text-xs sm:text-sm font-medium text-zinc-100 whitespace-nowrap shadow-lg">
+            <div className="absolute top-32 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg bg-zinc-950/90 border border-red-500/40 text-xs sm:text-sm font-medium text-zinc-100 whitespace-nowrap shadow-lg">
               {showTouchControls ? 'Hold GAS to ride' : 'Hold W or Up Arrow to accelerate'}
             </div>
           )}
 
-          {/* Desktop Speedometer Cluster (Bottom-Right) */}
-          <div className="hidden md:block absolute bottom-5 right-5 bg-zinc-950/92 border border-white/10 rounded-2xl px-5 py-4 shadow-2xl min-w-[210px]">
-            <div className="flex items-end justify-between gap-4">
-              <div>
-                <div className="text-[11px] font-semibold tracking-wider text-zinc-400">
-                  SPEED
-                </div>
-                <div className="flex items-baseline gap-1.5">
-                  <span className="font-display text-5xl font-bold text-white tabular-nums leading-none">
-                    {telemetry.speedKmh}
-                  </span>
-                  <span className="font-display text-sm font-bold text-red-500">
-                    KM/H
-                  </span>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-[10px] font-semibold tracking-wider text-zinc-400">
-                  GEAR
-                </div>
-                <div className="font-display text-2xl font-bold text-red-400 tabular-nums leading-none mt-0.5">
-                  {telemetry.gear}
-                </div>
-              </div>
-            </div>
-            <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden mt-3">
-              <div
-                className="h-full bg-gradient-to-r from-red-600 via-red-500 to-amber-400 transition-[width] duration-75"
-                style={{ width: `${speedPct}%` }}
-              />
-            </div>
-            <div className="flex justify-between text-[10px] font-medium text-zinc-500 mt-1.5 tabular-nums">
-              <span>0</span>
-              <span>{Math.round(equippedBikeSpec.topSpeedKmh / 2)}</span>
-              <span>{equippedBikeSpec.topSpeedKmh}</span>
-            </div>
+          {/* Desktop Circular Speedometer Gauge (Bottom-Right) */}
+          <div className="hidden md:block absolute bottom-5 right-5">
+            <SpeedometerGauge
+              speedKmh={telemetry.speedKmh}
+              maxSpeedKmh={equippedBikeSpec.topSpeedKmh}
+              gear={telemetry.gear}
+              bikeName={equippedBikeSpec.name}
+              hasNitro={telemetry.hasNitro}
+              nitroLevel={telemetry.nitroLevel}
+              nitroActive={telemetry.nitroActive}
+            />
           </div>
 
           {/* Desktop Subtle Controls Strip (Bottom-Left when touch controls hidden) */}
           {!showTouchControls && (
-            <div className="hidden md:flex absolute bottom-5 left-5 items-center gap-3 bg-zinc-950/85 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-zinc-300">
+            <div className="hidden md:flex flex-wrap absolute bottom-5 left-5 items-center gap-3 bg-zinc-950/88 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-zinc-300">
               <span>
                 <strong className="text-white">W / ↑</strong> Gas
               </span>
@@ -844,66 +979,116 @@ export default function App() {
               <span>
                 <strong className="text-white">A D / ← →</strong> Steer
               </span>
+              <span className="text-zinc-600" aria-hidden="true">·</span>
+              <span>
+                <strong className="text-amber-300">Shift / E</strong> Wheelie & Flip
+              </span>
+              {telemetry.hasNitro && (
+                <>
+                  <span className="text-zinc-600" aria-hidden="true">·</span>
+                  <span>
+                    <strong className="text-sky-300">N / F</strong> Nitro
+                  </span>
+                </>
+              )}
             </div>
           )}
 
           {/* Mobile / Touch Controls Overlay (Continuous hold-responsive multi-touch) */}
           {showTouchControls && gameState === 'playing' && (
             <>
-              {/* Left & Right Steering Pad (Bottom-Left) */}
-              <div className="pointer-events-auto absolute bottom-4 left-4 flex items-center gap-3">
+              {/* Left & Right Steering Pad + Stunt Wheelie/Flip button (Bottom-Left) */}
+              <div className="pointer-events-auto absolute bottom-4 left-4 flex flex-col items-start gap-2.5">
                 <button
                   type="button"
-                  aria-label="Steer left"
-                  {...bindTouchControl('left')}
-                  className={`w-16 h-16 sm:w-[72px] sm:h-[72px] rounded-2xl border flex items-center justify-center transition-transform cursor-pointer touch-none ${
-                    activeTouch.left
-                      ? 'bg-red-600 border-red-400 text-white scale-95'
-                      : 'bg-zinc-950/88 border-white/15 text-white'
+                  aria-label="Wheelie or Air Flip"
+                  {...bindTouchControl('wheelie')}
+                  className={`h-11 px-4 rounded-xl border font-display text-xs font-bold tracking-wider flex items-center gap-1.5 transition-transform cursor-pointer touch-none ${
+                    activeTouch.wheelie
+                      ? 'bg-amber-500 border-amber-300 text-zinc-950 scale-95'
+                      : 'bg-zinc-950/88 border-amber-400/40 text-amber-300'
                   }`}
                 >
-                  <ChevronLeft className="w-9 h-9" />
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>{telemetry.isAirborne ? 'AIR FLIP' : 'WHEELIE'}</span>
                 </button>
-                <button
-                  type="button"
-                  aria-label="Steer right"
-                  {...bindTouchControl('right')}
-                  className={`w-16 h-16 sm:w-[72px] sm:h-[72px] rounded-2xl border flex items-center justify-center transition-transform cursor-pointer touch-none ${
-                    activeTouch.right
-                      ? 'bg-red-600 border-red-400 text-white scale-95'
-                      : 'bg-zinc-950/88 border-white/15 text-white'
-                  }`}
-                >
-                  <ChevronRight className="w-9 h-9" />
-                </button>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    aria-label="Steer left"
+                    {...bindTouchControl('left')}
+                    className={`w-16 h-16 sm:w-[72px] sm:h-[72px] rounded-2xl border flex items-center justify-center transition-transform cursor-pointer touch-none ${
+                      activeTouch.left
+                        ? 'bg-red-600 border-red-400 text-white scale-95'
+                        : 'bg-zinc-950/88 border-white/15 text-white'
+                    }`}
+                  >
+                    <ChevronLeft className="w-9 h-9" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Steer right"
+                    {...bindTouchControl('right')}
+                    className={`w-16 h-16 sm:w-[72px] sm:h-[72px] rounded-2xl border flex items-center justify-center transition-transform cursor-pointer touch-none ${
+                      activeTouch.right
+                        ? 'bg-red-600 border-red-400 text-white scale-95'
+                        : 'bg-zinc-950/88 border-white/15 text-white'
+                    }`}
+                  >
+                    <ChevronRight className="w-9 h-9" />
+                  </button>
+                </div>
               </div>
 
-              {/* Brake & Gas Pedals (Bottom-Right) */}
-              <div className="pointer-events-auto absolute bottom-4 right-4 md:bottom-36 flex items-end gap-3">
-                <button
-                  type="button"
-                  aria-label="Brake"
-                  {...bindTouchControl('brake')}
-                  className={`w-[68px] h-16 sm:w-20 sm:h-[72px] rounded-2xl border font-display text-xs sm:text-sm font-bold tracking-wider flex flex-col items-center justify-center transition-transform cursor-pointer touch-none ${
-                    activeTouch.brake
-                      ? 'bg-amber-600 border-amber-400 text-white scale-95'
-                      : 'bg-zinc-950/88 border-white/15 text-zinc-200'
-                  }`}
-                >
-                  <span>BRAKE</span>
-                </button>
-                <button
-                  type="button"
-                  aria-label="Accelerate"
-                  {...bindTouchControl('accelerate')}
-                  className={`w-[74px] h-[76px] sm:w-22 sm:h-24 rounded-2xl border font-display text-sm sm:text-base font-bold tracking-wider flex flex-col items-center justify-center transition-transform cursor-pointer touch-none ${
-                    activeTouch.accelerate
-                      ? 'bg-red-500 border-red-300 text-white scale-95'
-                      : 'bg-red-600/95 border-red-400/50 text-white'
-                  }`}
-                >
-                  <span>GAS</span>
-                </button>
+              {/* Brake, Gas & Nitro Pedals (Bottom-Right) */}
+              <div
+                className={`pointer-events-auto absolute bottom-4 right-4 ${
+                  telemetry.hasNitro ? 'md:bottom-[296px]' : 'md:bottom-[242px]'
+                } flex flex-col items-end gap-2.5`}
+              >
+                {telemetry.hasNitro && (
+                  <button
+                    type="button"
+                    aria-label="Nitro boost"
+                    {...bindTouchControl('nitro')}
+                    className={`h-11 px-4 rounded-xl border font-display text-xs font-bold tracking-wider flex items-center gap-1.5 transition-transform cursor-pointer touch-none ${
+                      activeTouch.nitro
+                        ? 'bg-sky-400 border-white text-zinc-950 scale-95'
+                        : 'bg-zinc-950/88 border-sky-400/50 text-sky-300'
+                    }`}
+                  >
+                    <Flame className="w-3.5 h-3.5" />
+                    <span>NITRO {telemetry.nitroLevel}%</span>
+                  </button>
+                )}
+
+                <div className="flex items-end gap-3">
+                  <button
+                    type="button"
+                    aria-label="Brake"
+                    {...bindTouchControl('brake')}
+                    className={`w-[68px] h-16 sm:w-20 sm:h-[72px] rounded-2xl border font-display text-xs sm:text-sm font-bold tracking-wider flex flex-col items-center justify-center transition-transform cursor-pointer touch-none ${
+                      activeTouch.brake
+                        ? 'bg-amber-600 border-amber-400 text-white scale-95'
+                        : 'bg-zinc-950/88 border-white/15 text-zinc-200'
+                    }`}
+                  >
+                    <span>BRAKE</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Accelerate"
+                    {...bindTouchControl('accelerate')}
+                    className={`w-[74px] h-[76px] sm:w-22 sm:h-24 rounded-2xl border font-display text-sm sm:text-base font-bold tracking-wider flex flex-col items-center justify-center transition-transform cursor-pointer touch-none ${
+                      activeTouch.accelerate
+                        ? 'bg-red-500 border-red-300 text-white scale-95'
+                        : 'bg-red-600/95 border-red-400/50 text-white'
+                    }`}
+                  >
+                    <span>GAS</span>
+                  </button>
+                </div>
               </div>
             </>
           )}
@@ -927,7 +1112,7 @@ export default function App() {
 
             <div className="text-center min-w-0">
               <div className="font-display text-base sm:text-xl font-bold tracking-wider text-white truncate">
-                MOTORCYCLE SHOWROOM
+                GARAGE / SHOWROOM
               </div>
               <div className="hidden md:block text-[11px] font-medium text-zinc-400">
                 Drag center 3D view to rotate · Scroll to zoom
@@ -1034,7 +1219,8 @@ export default function App() {
                               {bike.name}
                             </div>
                             <div className="text-[11px] font-medium text-zinc-400 tabular-nums mt-0.5">
-                              {bike.price === 0 ? 'FREE' : `${bike.price.toLocaleString()} coins`}
+                              {bike.topSpeedKmh} KM/H ·{' '}
+                              {bike.price === 0 ? 'STARTER' : `${bike.price.toLocaleString()} coins`}
                             </div>
                           </div>
                         </div>
@@ -1127,18 +1313,28 @@ export default function App() {
                   </div>
 
                   {/* Bike Name & Tagline */}
-                  <h2 className="font-display text-2xl xl:text-3xl font-bold text-white leading-tight mt-3">
+                  <div className="mt-3 text-[10px] font-bold tracking-widest text-zinc-400">
+                    {focusedBikeSpec.category}
+                  </div>
+                  <h2 className="font-display text-2xl xl:text-3xl font-bold text-white leading-tight mt-0.5">
                     {focusedBikeSpec.name}
                   </h2>
                   <p className="text-xs text-zinc-400 mt-1.5 leading-relaxed">
                     {focusedBikeSpec.tagline}
                   </p>
 
+                  {focusedBikeSpec.hasNitro && (
+                    <div className="mt-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-sky-500/15 border border-sky-400/40 text-[11px] font-bold tracking-wider text-sky-300">
+                      <Flame className="w-3.5 h-3.5" />
+                      <span>NITRO BOOST EQUIPPED</span>
+                    </div>
+                  )}
+
                   {/* Specifications Panel */}
-                  <div className="mt-5 pt-4 border-t border-white/10 flex flex-col gap-3.5">
+                  <div className="mt-4 pt-4 border-t border-white/10 flex flex-col gap-3.5">
                     <div>
                       <div className="flex justify-between text-xs font-semibold text-zinc-300 mb-1.5">
-                        <span>TOP SPEED</span>
+                        <span>TOP SPEED (STRICT CAP)</span>
                         <span className="font-display text-white tabular-nums">
                           {focusedBikeSpec.topSpeedKmh} KM/H
                         </span>
@@ -1147,7 +1343,7 @@ export default function App() {
                         <div
                           className="h-full bg-red-500 transition-[width] duration-300"
                           style={{
-                            width: `${Math.min(100, Math.round((focusedBikeSpec.topSpeedKmh / 280) * 100))}%`,
+                            width: `${Math.min(100, Math.round((focusedBikeSpec.topSpeedKmh / 300) * 100))}%`,
                           }}
                         />
                       </div>
@@ -1325,7 +1521,7 @@ export default function App() {
                     <div
                       className="h-full bg-red-500"
                       style={{
-                        width: `${Math.min(100, Math.round((focusedBikeSpec.topSpeedKmh / 280) * 100))}%`,
+                        width: `${Math.min(100, Math.round((focusedBikeSpec.topSpeedKmh / 300) * 100))}%`,
                       }}
                     />
                   </div>
@@ -1429,7 +1625,13 @@ export default function App() {
 
       {/* MAIN MENU OVERLAY */}
       {gameState === 'menu' && (
-        <div className="absolute inset-0 z-30 flex flex-col justify-between p-4 sm:p-8 bg-gradient-to-t from-zinc-950/90 via-zinc-950/45 to-zinc-950/60">
+        <div
+          className={`absolute inset-0 z-30 flex flex-col justify-between p-4 sm:p-8 ${
+            showSettingsModal
+              ? 'bg-zinc-950/15'
+              : 'bg-gradient-to-t from-zinc-950/90 via-zinc-950/45 to-zinc-950/60'
+          }`}
+        >
           {/* Top Stats & Audio Row */}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -1452,19 +1654,33 @@ export default function App() {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleToggleMute}
-              aria-label={muted ? 'Unmute audio' : 'Mute audio'}
-              className="inline-flex items-center gap-2 h-11 px-4 rounded-xl bg-zinc-950/88 border border-white/10 text-sm font-medium text-zinc-200 hover:text-white hover:border-white/25 transition-colors cursor-pointer whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-red-500"
-            >
-              {muted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4" />}
-              <span>{muted ? 'Muted' : 'Sound On'}</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                data-testid="menu-settings-btn"
+                onClick={handleOpenSettings}
+                aria-label="Open settings"
+                className="inline-flex items-center gap-2 h-11 px-4 rounded-xl bg-zinc-950/88 border border-white/10 text-sm font-medium text-zinc-200 hover:text-white hover:border-red-500/60 transition-colors cursor-pointer whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-red-500"
+              >
+                <Settings className="w-4 h-4 text-red-400" />
+                <span>Settings</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleToggleMute}
+                aria-label={muted ? 'Unmute audio' : 'Mute audio'}
+                className="inline-flex items-center gap-2 h-11 px-4 rounded-xl bg-zinc-950/88 border border-white/10 text-sm font-medium text-zinc-200 hover:text-white hover:border-white/25 transition-colors cursor-pointer whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-red-500"
+              >
+                {muted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4" />}
+                <span className="hidden sm:inline">{muted ? 'Muted' : 'Sound On'}</span>
+              </button>
+            </div>
           </div>
 
           {/* Center Title, Play & Showroom CTA */}
-          <div className="w-full max-w-lg mx-auto bg-zinc-950/92 border border-white/10 rounded-2xl p-6 sm:p-8 shadow-2xl text-center">
+          {!showSettingsModal && !showMissionsModal ? (
+            <div className="w-full max-w-lg mx-auto bg-zinc-950/92 border border-white/10 rounded-2xl p-6 sm:p-8 shadow-2xl text-center">
             <div className="text-xs font-semibold tracking-widest text-red-500 mb-2">
               HIGHWAY RACING SIMULATOR
             </div>
@@ -1472,7 +1688,7 @@ export default function App() {
               INDIAN BIKE RIDER 3D
             </h1>
             <p className="text-sm text-zinc-300 mt-3 max-w-md mx-auto leading-relaxed">
-              Weave through bustling Indian highway traffic, earn coins on every kilometer, and unlock superbikes in the 3D Showroom.
+              Dodge oncoming cars, trucks & auto-rickshaws, hit stunt ramps for air-flips, pop wheelies, and collect golden coins to unlock superbikes.
             </p>
 
             <div className="mt-3 text-xs font-semibold text-zinc-300">
@@ -1482,11 +1698,58 @@ export default function App() {
               </span>{' '}
               <span className="text-zinc-500">·</span>{' '}
               <span className="text-red-400 font-display tabular-nums">
-                {equippedBikeSpec.topSpeedKmh} KM/H
+                {equippedBikeSpec.topSpeedKmh} KM/H CAP
               </span>
+              {equippedBikeSpec.hasNitro && (
+                <>
+                  {' '}
+                  <span className="text-zinc-500">·</span>{' '}
+                  <span className="text-sky-400 font-display">NITRO</span>
+                </>
+              )}
             </div>
 
-            <div className="mt-5 flex flex-col gap-3">
+            {/* Dynamic Weather Selector */}
+            <div className="mt-4 flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-zinc-900/85 border border-white/10">
+              <span className="text-[11px] font-semibold tracking-wider text-zinc-400 shrink-0">
+                WEATHER
+              </span>
+              <div
+                className="grid grid-cols-3 gap-1.5 flex-1 max-w-[260px]"
+                role="radiogroup"
+                aria-label="Highway weather"
+              >
+                {WEATHER_OPTIONS.map((opt) => {
+                  const active = weather === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      data-testid={`menu-weather-${opt.id}`}
+                      onClick={() => handleSelectWeather(opt.id)}
+                      className={`inline-flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer whitespace-nowrap ${
+                        active
+                          ? opt.id === 'rain'
+                            ? 'bg-sky-500/20 border-sky-400 text-sky-200'
+                            : opt.id === 'fog'
+                              ? 'bg-slate-400/20 border-slate-300 text-white'
+                              : 'bg-amber-500/20 border-amber-400 text-amber-200'
+                          : 'bg-zinc-950/70 border-white/10 text-zinc-400 hover:text-white hover:border-white/25'
+                      }`}
+                    >
+                      {opt.id === 'sunny' && <Sun className="w-3.5 h-3.5 shrink-0" />}
+                      {opt.id === 'rain' && <CloudRain className="w-3.5 h-3.5 shrink-0" />}
+                      {opt.id === 'fog' && <CloudFog className="w-3.5 h-3.5 shrink-0" />}
+                      <span>{opt.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-col gap-3">
               <button
                 type="button"
                 onClick={handlePlay}
@@ -1503,7 +1766,7 @@ export default function App() {
                   className="inline-flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 active:scale-[0.98] border border-red-500/40 hover:border-red-500 text-white font-display text-sm sm:text-base font-bold tracking-wider transition-all cursor-pointer whitespace-nowrap focus-visible:outline-2 focus-visible:outline-red-500"
                 >
                   <Sparkles className="w-4 h-4 text-red-400 shrink-0" />
-                  <span>SHOWROOM</span>
+                  <span>GARAGE</span>
                 </button>
 
                 <button
@@ -1534,15 +1797,21 @@ export default function App() {
                 <div>W / ↑ : Accelerate</div>
                 <div>S / ↓ / Space : Brake</div>
                 <div>A / D or ← / → : Steer</div>
+                <div>Shift / E : Wheelie & Air-Flip</div>
+                <div>N / F : Nitro (Ducati V4)</div>
               </div>
               <div>
                 <div className="font-semibold text-white mb-1">Mobile Touch</div>
-                <div>Hold Left / Right pads to steer</div>
+                <div>Hold Left / Right to steer</div>
                 <div>Hold GAS / BRAKE pedals</div>
-                <div>Tap Pause anytime</div>
+                <div>WHEELIE / AIR FLIP pad</div>
+                <div>NITRO button (Ducati V4)</div>
               </div>
             </div>
-          </div>
+            </div>
+          ) : (
+            <div aria-hidden="true" />
+          )}
 
           <div className="h-2" aria-hidden="true" />
         </div>
@@ -1572,7 +1841,81 @@ export default function App() {
               </div>
             </div>
 
-            <div className="mt-6 flex flex-col gap-3">
+            {/* In-Ride Weather Settings Toggle */}
+            <div className="mt-3 flex items-center justify-between gap-2 bg-zinc-900/90 border border-white/5 rounded-xl px-3 py-2">
+              <span className="text-[11px] font-semibold tracking-wider text-zinc-400">
+                WEATHER
+              </span>
+              <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="Weather settings">
+                {WEATHER_OPTIONS.map((opt) => {
+                  const active = weather === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      data-testid={`pause-weather-${opt.id}`}
+                      onClick={() => handleSelectWeather(opt.id)}
+                      className={`inline-flex items-center justify-center gap-1 py-1 px-2 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer ${
+                        active
+                          ? opt.id === 'rain'
+                            ? 'bg-sky-500/20 border-sky-400 text-sky-200'
+                            : opt.id === 'fog'
+                              ? 'bg-slate-400/20 border-slate-300 text-white'
+                              : 'bg-amber-500/20 border-amber-400 text-amber-200'
+                          : 'bg-zinc-950/70 border-white/10 text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      {opt.id === 'sunny' && <Sun className="w-3 h-3 shrink-0" />}
+                      {opt.id === 'rain' && <CloudRain className="w-3 h-3 shrink-0" />}
+                      {opt.id === 'fog' && <CloudFog className="w-3 h-3 shrink-0" />}
+                      <span>{opt.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* In-Ride Ambient Light Intensity Slider */}
+            <div className="mt-3 bg-zinc-900/90 border border-white/5 rounded-xl px-3 py-2.5 text-left">
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <label
+                  htmlFor="pause-ambient-slider"
+                  className="text-[11px] font-semibold tracking-wider text-zinc-400"
+                >
+                  AMBIENT LIGHT
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="font-display text-xs font-bold text-amber-300 tabular-nums">
+                    {Math.round(ambientIntensity * 100)}%
+                  </span>
+                  {ambientIntensity !== DEFAULT_AMBIENT_INTENSITY && (
+                    <button
+                      type="button"
+                      onClick={() => handleChangeAmbientIntensity(DEFAULT_AMBIENT_INTENSITY)}
+                      className="text-[10px] font-semibold text-zinc-400 hover:text-white underline cursor-pointer"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+              </div>
+              <input
+                id="pause-ambient-slider"
+                data-testid="pause-ambient-slider"
+                type="range"
+                min={MIN_AMBIENT_INTENSITY}
+                max={MAX_AMBIENT_INTENSITY}
+                step={0.05}
+                value={ambientIntensity}
+                onChange={(e) => handleChangeAmbientIntensity(parseFloat(e.target.value))}
+                aria-label="Ambient light intensity"
+                className="w-full h-2 accent-red-500 bg-zinc-800 rounded-lg cursor-pointer touch-auto"
+              />
+            </div>
+
+            <div className="mt-5 flex flex-col gap-3">
               <button
                 type="button"
                 onClick={handleResume}
@@ -1655,14 +1998,16 @@ export default function App() {
                 </div>
               </div>
               <div className="bg-zinc-900 border border-white/5 rounded-xl p-3">
-                <div className="text-[11px] font-medium text-zinc-400">DISTANCE</div>
-                <div className="font-display text-xl font-bold text-zinc-100 tabular-nums mt-0.5">
-                  {formatDistance(telemetry.distanceM)}
+                <div className="text-[11px] font-medium text-zinc-400">DISTANCE · TOP SPD</div>
+                <div className="font-display text-lg font-bold text-zinc-100 tabular-nums mt-0.5">
+                  {formatDistance(telemetry.distanceM)} · {telemetry.peakSpeedKmh} km/h
                 </div>
               </div>
               <div className="bg-zinc-900 border border-amber-500/20 rounded-xl p-3">
-                <div className="text-[11px] font-medium text-zinc-400">COINS EARNED</div>
-                <div className="font-display text-xl font-bold text-amber-300 tabular-nums mt-0.5 flex items-center gap-1.5">
+                <div className="text-[11px] font-medium text-zinc-400">
+                  COINS ({telemetry.flipsInRun} FLIPS)
+                </div>
+                <div className="font-display text-lg font-bold text-amber-300 tabular-nums mt-0.5 flex items-center gap-1.5">
                   <span>+{telemetry.runCoinsEarned.toLocaleString()}</span>
                   <span className="text-[11px] font-normal text-zinc-400">
                     ({coins.toLocaleString()})
@@ -1929,6 +2274,182 @@ export default function App() {
                 className="w-full sm:w-auto inline-flex items-center justify-center py-3 px-5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-white/15 text-zinc-200 font-semibold text-sm transition-colors cursor-pointer whitespace-nowrap"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SETTINGS MODAL */}
+      {showSettingsModal && (
+        <div
+          data-testid="settings-modal"
+          className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/20"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-modal-title"
+        >
+          <div className="w-full max-w-md max-h-[90vh] flex flex-col bg-zinc-950 border border-white/15 rounded-2xl shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between gap-4 px-5 py-4 sm:px-6 border-b border-white/10">
+              <div className="flex items-center gap-2.5">
+                <Settings className="w-5 h-5 text-red-500 shrink-0" />
+                <h2
+                  id="settings-modal-title"
+                  className="font-display text-xl sm:text-2xl font-bold text-white leading-tight"
+                >
+                  Settings
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  engineRef.current?.sound.playClick();
+                  setShowSettingsModal(false);
+                }}
+                aria-label="Close settings"
+                className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-white/15 text-zinc-300 hover:text-white transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-red-500"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Settings Content */}
+            <div className="flex-1 overflow-y-auto p-5 sm:p-6 flex flex-col gap-5">
+              {/* Ambient Light Intensity Slider */}
+              <div className="bg-zinc-900/90 border border-white/10 rounded-xl p-4">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <label
+                    htmlFor="settings-ambient-slider"
+                    className="text-xs font-bold tracking-wider text-zinc-200"
+                  >
+                    AMBIENT LIGHT INTENSITY
+                  </label>
+                  <div className="flex items-center gap-2.5">
+                    <span
+                      data-testid="settings-ambient-value"
+                      className="font-display text-sm font-bold text-amber-300 tabular-nums"
+                    >
+                      {Math.round(ambientIntensity * 100)}%
+                    </span>
+                    <button
+                      type="button"
+                      data-testid="settings-ambient-reset"
+                      onClick={() => handleChangeAmbientIntensity(DEFAULT_AMBIENT_INTENSITY)}
+                      disabled={ambientIntensity === DEFAULT_AMBIENT_INTENSITY}
+                      className={`text-xs font-semibold px-2 py-0.5 rounded border transition-colors ${
+                        ambientIntensity === DEFAULT_AMBIENT_INTENSITY
+                          ? 'border-white/5 text-zinc-600 cursor-default'
+                          : 'border-white/15 text-zinc-300 hover:text-white hover:border-white/30 cursor-pointer'
+                      }`}
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </div>
+                <p className="text-xs text-zinc-400 mb-3">
+                  Adjust the 3D scene ambient brightness in real time.
+                </p>
+                <input
+                  id="settings-ambient-slider"
+                  data-testid="settings-ambient-slider"
+                  type="range"
+                  min={MIN_AMBIENT_INTENSITY}
+                  max={MAX_AMBIENT_INTENSITY}
+                  step={0.05}
+                  value={ambientIntensity}
+                  onChange={(e) => handleChangeAmbientIntensity(parseFloat(e.target.value))}
+                  aria-label="Ambient light intensity"
+                  className="w-full h-2.5 accent-red-500 bg-zinc-800 rounded-lg cursor-pointer touch-auto"
+                />
+                <div className="flex justify-between text-[11px] font-medium text-zinc-500 tabular-nums mt-1.5">
+                  <span>Dim (25%)</span>
+                  <span>Default (100%)</span>
+                  <span>Bright (200%)</span>
+                </div>
+              </div>
+
+              {/* Weather Toggle */}
+              <div className="bg-zinc-900/90 border border-white/10 rounded-xl p-4">
+                <div className="text-xs font-bold tracking-wider text-zinc-200 mb-2.5">
+                  HIGHWAY WEATHER
+                </div>
+                <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Highway weather settings">
+                  {WEATHER_OPTIONS.map((opt) => {
+                    const active = weather === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        data-testid={`settings-weather-${opt.id}`}
+                        onClick={() => handleSelectWeather(opt.id)}
+                        className={`inline-flex items-center justify-center gap-1.5 py-2.5 px-2.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                          active
+                            ? opt.id === 'rain'
+                              ? 'bg-sky-500/20 border-sky-400 text-sky-200'
+                              : opt.id === 'fog'
+                                ? 'bg-slate-400/20 border-slate-300 text-white'
+                                : 'bg-amber-500/20 border-amber-400 text-amber-200'
+                            : 'bg-zinc-950/70 border-white/10 text-zinc-400 hover:text-white hover:border-white/25'
+                        }`}
+                      >
+                        {opt.id === 'sunny' && <Sun className="w-3.5 h-3.5 shrink-0" />}
+                        {opt.id === 'rain' && <CloudRain className="w-3.5 h-3.5 shrink-0" />}
+                        {opt.id === 'fog' && <CloudFog className="w-3.5 h-3.5 shrink-0" />}
+                        <span>{opt.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Audio & Touch Controls */}
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={handleToggleMute}
+                  className="inline-flex items-center justify-center gap-2 py-3 px-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-sm font-semibold text-zinc-200 transition-colors cursor-pointer"
+                >
+                  {muted ? (
+                    <VolumeX className="w-4 h-4 text-red-400 shrink-0" />
+                  ) : (
+                    <Volume2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  )}
+                  <span>{muted ? 'Muted' : 'Sound On'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    engineRef.current?.sound.playClick();
+                    setShowTouchControls((v) => !v);
+                  }}
+                  className={`inline-flex items-center justify-center gap-2 py-3 px-3 rounded-xl border text-sm font-semibold transition-colors cursor-pointer ${
+                    showTouchControls
+                      ? 'bg-red-600/20 border-red-500/60 text-white'
+                      : 'bg-zinc-900 hover:bg-zinc-800 border-white/10 text-zinc-300'
+                  }`}
+                >
+                  <Gamepad2 className="w-4 h-4 shrink-0" />
+                  <span>{showTouchControls ? 'Touch: On' : 'Touch: Auto'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-4 sm:px-6 border-t border-white/10 flex justify-end bg-zinc-950">
+              <button
+                type="button"
+                data-testid="settings-done-btn"
+                onClick={() => {
+                  engineRef.current?.sound.playClick();
+                  setShowSettingsModal(false);
+                }}
+                className="w-full sm:w-auto inline-flex items-center justify-center py-2.5 px-6 rounded-xl bg-red-600 hover:bg-red-500 text-white font-display text-sm font-bold tracking-wider transition-colors cursor-pointer whitespace-nowrap"
+              >
+                DONE
               </button>
             </div>
           </div>

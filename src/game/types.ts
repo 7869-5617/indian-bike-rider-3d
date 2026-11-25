@@ -1,15 +1,14 @@
 export type GameState = 'menu' | 'showroom' | 'playing' | 'paused' | 'gameover';
 
-export type BikeId =
-  | 'street-beast'
-  | 'speed-x'
-  | 'ninja-pro'
-  | 'phantom-rr'
-  | 'ducati-fury';
+export type WeatherMode = 'sunny' | 'rain' | 'fog';
+
+export type BikeId = 'ninja-zx6r' | 'ducati-sf-v4';
 
 export interface BikeSpec {
   id: BikeId;
   name: string;
+  category: string;
+  modelUrl: string;
   price: number;
   tagline: string;
   topSpeedKmh: number;
@@ -17,6 +16,7 @@ export interface BikeSpec {
   handlingStat: number;
   accelMultiplier: number;
   handlingMultiplier: number;
+  hasNitro: boolean;
   accentHex: string;
 }
 
@@ -25,19 +25,31 @@ export interface InputState {
   brake: boolean;
   left: boolean;
   right: boolean;
+  wheelie: boolean;
+  nitro: boolean;
 }
 
 export interface GameTelemetry {
   speedKmh: number;
   peakSpeedKmh: number;
+  maxBikeSpeedKmh: number;
   distanceM: number;
   highSpeedDistanceM: number;
   score: number;
+  stuntScore: number;
   bestScore: number;
   coins: number;
   runCoinsEarned: number;
+  coinsCollectedInRun: number;
   difficultyLevel: number;
   nearMisses: number;
+  flipsInRun: number;
+  wheelieActive: boolean;
+  isAirborne: boolean;
+  nitroLevel: number;
+  nitroActive: boolean;
+  hasNitro: boolean;
+  stuntCallout: string | null;
   isNewBest: boolean;
   gear: number;
 }

@@ -7,6 +7,7 @@ export interface ProceduralTextures {
   highwaySign: THREE.CanvasTexture;
   speedSign: THREE.CanvasTexture;
   barricade: THREE.CanvasTexture;
+  rampSurface: THREE.CanvasTexture;
   contactShadow: THREE.CanvasTexture;
   dispose: () => void;
 }
@@ -31,20 +32,20 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   const anisotropy = Math.max(1, Math.min(maxAnisotropy, 16));
   const created: THREE.CanvasTexture[] = [];
 
-  // 1. Indian 4-Lane Highway Asphalt Texture
+  // 1. Indian 4-Lane Two-Way Highway Asphalt Texture
   const asphaltCanvas = document.createElement('canvas');
   asphaltCanvas.width = 512;
   asphaltCanvas.height = 512;
   const actx = asphaltCanvas.getContext('2d')!;
 
-  actx.fillStyle = '#2b2d31';
+  actx.fillStyle = '#282a2f';
   actx.fillRect(0, 0, 512, 512);
 
   // Aggregate mineral speckle
   for (let i = 0; i < 9000; i++) {
     const x = Math.random() * 512;
     const y = Math.random() * 512;
-    const shade = 34 + Math.floor(Math.random() * 28);
+    const shade = 32 + Math.floor(Math.random() * 28);
     actx.fillStyle = `rgb(${shade},${shade + 1},${shade + 3})`;
     actx.fillRect(x, y, 2, 2);
   }
@@ -53,11 +54,11 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   const laneCenters = [96, 200, 312, 416];
   for (const cx of laneCenters) {
     const grad = actx.createLinearGradient(cx - 28, 0, cx + 28, 0);
-    grad.addColorStop(0, 'rgba(18,19,22,0)');
-    grad.addColorStop(0.3, 'rgba(18,19,22,0.22)');
-    grad.addColorStop(0.5, 'rgba(18,19,22,0.06)');
-    grad.addColorStop(0.7, 'rgba(18,19,22,0.22)');
-    grad.addColorStop(1, 'rgba(18,19,22,0)');
+    grad.addColorStop(0, 'rgba(16,17,20,0)');
+    grad.addColorStop(0.3, 'rgba(16,17,20,0.24)');
+    grad.addColorStop(0.5, 'rgba(16,17,20,0.06)');
+    grad.addColorStop(0.7, 'rgba(16,17,20,0.24)');
+    grad.addColorStop(1, 'rgba(16,17,20,0)');
     actx.fillStyle = grad;
     actx.fillRect(cx - 28, 0, 56, 512);
   }
@@ -67,10 +68,10 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   actx.fillRect(18, 0, 8, 512);
   actx.fillRect(486, 0, 8, 512);
 
-  // Center double yellow highway divider
-  actx.fillStyle = '#eab308';
-  actx.fillRect(248, 0, 6, 512);
-  actx.fillRect(258, 0, 6, 512);
+  // Center double yellow two-way divider separating oncoming left lanes from right lanes
+  actx.fillStyle = '#facc15';
+  actx.fillRect(247, 0, 6, 512);
+  actx.fillRect(259, 0, 6, 512);
 
   // White dashed lane dividers (between lanes 1-2 and lanes 3-4)
   actx.fillStyle = '#e5e7eb';
@@ -99,7 +100,6 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
     } else if (r < 0.85) {
       gctx.fillStyle = '#5c8d47';
     } else {
-      // Warm dusty earth patch
       gctx.fillStyle = '#7c6544';
     }
     gctx.fillRect(x, y, 3, 4);
@@ -109,10 +109,10 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
 
   // 3. Indian Building & Shop Facades (4 colorful variants)
   const facadeSpecs = [
-    { wall: '#f5e6c8', trim: '#c2410c', awning: '#ea580c', signBg: '#1e3a8a', signText: 'SHARMA CHAI & DHABA' },
-    { wall: '#e2e8f0', trim: '#0f766e', awning: '#16a34a', signBg: '#b91c1c', signText: 'KISAN TYRE & MOTORS' },
-    { wall: '#fde68a', trim: '#92400e', awning: '#dc2626', signBg: '#065f46', signText: 'BHARAT GENERAL STORE' },
-    { wall: '#d1fae5', trim: '#1e293b', awning: '#0284c7', signBg: '#7c2d12', signText: 'HIGHWAY SWEETS & SNACKS' },
+    { wall: '#f5e6c8', trim: '#c2410c', signBg: '#1e3a8a', signText: 'SHARMA CHAI & DHABA' },
+    { wall: '#e2e8f0', trim: '#0f766e', signBg: '#b91c1c', signText: 'KISAN TYRE & MOTORS' },
+    { wall: '#fde68a', trim: '#92400e', signBg: '#065f46', signText: 'BHARAT GENERAL STORE' },
+    { wall: '#d1fae5', trim: '#1e293b', signBg: '#7c2d12', signText: 'HIGHWAY SWEETS & SNACKS' },
   ];
 
   const facades = facadeSpecs.map((spec) => {
@@ -124,12 +124,10 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
     ctx.fillStyle = spec.wall;
     ctx.fillRect(0, 0, 256, 256);
 
-    // Upper floor concrete trim & windows
     ctx.fillStyle = spec.trim;
     ctx.fillRect(0, 0, 256, 12);
     ctx.fillRect(0, 122, 256, 8);
 
-    // Upper windows with grilles
     for (const wx of [26, 104, 182]) {
       ctx.fillStyle = '#1e293b';
       ctx.fillRect(wx, 34, 48, 56);
@@ -141,7 +139,6 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
       ctx.strokeRect(wx, 34, 48, 56);
     }
 
-    // Shop signboard
     ctx.fillStyle = spec.signBg;
     ctx.fillRect(14, 134, 228, 30);
     ctx.strokeStyle = '#facc15';
@@ -153,7 +150,6 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
     ctx.textBaseline = 'middle';
     ctx.fillText(spec.signText, 128, 149);
 
-    // Corrugated steel shop shutters (open/half-open feel)
     ctx.fillStyle = '#334155';
     ctx.fillRect(22, 174, 96, 82);
     ctx.fillRect(138, 174, 96, 82);
@@ -162,7 +158,6 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
       ctx.fillRect(24, sy, 92, 3);
       ctx.fillRect(140, sy, 92, 3);
     }
-    // Warm shop interior glow below half-shutter
     ctx.fillStyle = '#fef3c7';
     ctx.fillRect(26, 212, 88, 42);
     ctx.fillRect(142, 212, 88, 42);
@@ -201,7 +196,7 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   highwaySign.wrapT = THREE.ClampToEdgeWrapping;
   created.push(highwaySign);
 
-  // 5. Speed Limit 60 Sign
+  // 5. Speed Limit Sign
   const spdCanvas = document.createElement('canvas');
   spdCanvas.width = 128;
   spdCanvas.height = 128;
@@ -241,7 +236,43 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
   const barricade = finalizeColorTexture(barCanvas, anisotropy, 1, 1);
   created.push(barricade);
 
-  // 7. Radial Contact Shadow Texture
+  // 7. Stunt Ramp Chevron Deck Texture
+  const rampCanvas = document.createElement('canvas');
+  rampCanvas.width = 256;
+  rampCanvas.height = 512;
+  const rctx = rampCanvas.getContext('2d')!;
+  rctx.fillStyle = '#18181b';
+  rctx.fillRect(0, 0, 256, 512);
+
+  // Side hazard rails
+  rctx.fillStyle = '#f59e0b';
+  rctx.fillRect(0, 0, 24, 512);
+  rctx.fillRect(232, 0, 24, 512);
+  rctx.fillStyle = '#111827';
+  for (let y = 0; y < 512; y += 64) {
+    rctx.fillRect(0, y, 24, 30);
+    rctx.fillRect(232, y, 24, 30);
+  }
+
+  // Glowing launch chevrons pointing up the ramp
+  rctx.strokeStyle = '#fbbf24';
+  rctx.lineWidth = 18;
+  rctx.lineCap = 'round';
+  rctx.lineJoin = 'round';
+  for (let cy = 96; cy < 480; cy += 120) {
+    rctx.beginPath();
+    rctx.moveTo(56, cy + 44);
+    rctx.lineTo(128, cy);
+    rctx.lineTo(200, cy + 44);
+    rctx.stroke();
+  }
+
+  const rampSurface = finalizeColorTexture(rampCanvas, anisotropy, 1, 1);
+  rampSurface.wrapS = THREE.ClampToEdgeWrapping;
+  rampSurface.wrapT = THREE.ClampToEdgeWrapping;
+  created.push(rampSurface);
+
+  // 8. Radial Contact Shadow Texture
   const shadowCanvas = document.createElement('canvas');
   shadowCanvas.width = 128;
   shadowCanvas.height = 128;
@@ -262,6 +293,7 @@ export function createProceduralTextures(maxAnisotropy: number): ProceduralTextu
     highwaySign,
     speedSign,
     barricade,
+    rampSurface,
     contactShadow,
     dispose: () => {
       created.forEach((t) => t.dispose());

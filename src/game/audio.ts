@@ -1,3 +1,5 @@
+import { WeatherMode } from './types';
+
 export class SoundEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
@@ -5,6 +7,10 @@ export class SoundEngine {
   private engineFilter: BiquadFilterNode | null = null;
   private oscPrimary: OscillatorNode | null = null;
   private oscSub: OscillatorNode | null = null;
+  private oscNitro: OscillatorNode | null = null;
+  private nitroGain: GainNode | null = null;
+  private rainSource: AudioBufferSourceNode | null = null;
+  private rainGain: GainNode | null = null;
   private noiseBuffer: AudioBuffer | null = null;
 
   private muted = false;
@@ -91,33 +97,83 @@ export class SoundEngine {
     this.engineFilter.connect(this.engineGain);
     this.engineGain.connect(this.masterGain);
 
+    // ZX-10R Nitro afterburner turbine layer
+    this.oscNitro = this.ctx.createOscillator();
+    this.oscNitro.type = 'sawtooth';
+    this.oscNitro.frequency.value = 240;
+    this.nitroGain = this.ctx.createGain();
+    this.nitroGain.gain.value = 0;
+    this.oscNitro.connect(this.nitroGain);
+    this.nitroGain.connect(this.masterGain);
+
     this.oscPrimary.start();
     this.oscSub.start();
+    this.oscNitro.start();
+
+    if (this.noiseBuffer) {
+      this.rainSource = this.ctx.createBufferSource();
+      this.rainSource.buffer = this.noiseBuffer;
+      this.rainSource.loop = true;
+
+      const rainFilter = this.ctx.createBiquadFilter();
+      rainFilter.type = 'bandpass';
+      rainFilter.frequency.value = 1150;
+      rainFilter.Q.value = 0.65;
+
+      this.rainGain = this.ctx.createGain();
+      this.rainGain.gain.value = 0;
+
+      this.rainSource.connect(rainFilter);
+      rainFilter.connect(this.rainGain);
+      this.rainGain.connect(this.masterGain);
+      this.rainSource.start();
+    }
+
     this.engineRunning = true;
   }
 
-  public updateEngine(speedKmh: number, accelerating: boolean, active: boolean): void {
+  public updateWeatherAudio(weather: WeatherMode, isPlaying: boolean): void {
+    if (!this.initialized || !this.ctx || !this.rainGain) return;
+    const now = this.ctx.currentTime;
+    const target =
+      this.muted || weather !== 'rain' ? 0 : isPlaying ? 0.055 : 0.022;
+    this.rainGain.gain.setTargetAtTime(target, now, 0.2);
+  }
+
+  public updateEngine(
+    speedKmh: number,
+    maxSpeedKmh: number,
+    accelerating: boolean,
+    active: boolean,
+    nitroActive = false
+  ): void {
     if (!this.initialized || !this.ctx || !this.engineRunning) return;
     if (!this.engineGain || !this.oscPrimary || !this.oscSub || !this.engineFilter) return;
 
     const now = this.ctx.currentTime;
     if (!active || this.muted) {
       this.engineGain.gain.setTargetAtTime(0, now, 0.06);
+      if (this.nitroGain) this.nitroGain.gain.setTargetAtTime(0, now, 0.05);
       return;
     }
 
-    // Simulate 5-gear sports bike RPM sweep across 0..220 km/h
-    const normalized = Math.min(Math.max(speedKmh / 220, 0), 1);
-    const gearCycle = (normalized * 4.5) % 1;
-    const basePitch = 46 + normalized * 95 + gearCycle * 42 + (accelerating ? 16 : 0);
+    const normalized = Math.min(Math.max(speedKmh / Math.max(maxSpeedKmh, 120), 0), 1);
+    const gearCycle = (normalized * 5.2) % 1;
+    const basePitch =
+      46 + normalized * 112 + gearCycle * 46 + (accelerating ? 16 : 0) + (nitroActive ? 34 : 0);
 
-    const targetGain = 0.055 + normalized * 0.08 + (accelerating ? 0.035 : 0);
-    const filterFreq = 220 + normalized * 820 + (accelerating ? 260 : 0);
+    const targetGain = 0.055 + normalized * 0.085 + (accelerating ? 0.035 : 0);
+    const filterFreq = 220 + normalized * 960 + (accelerating ? 280 : 0) + (nitroActive ? 450 : 0);
 
     this.oscPrimary.frequency.setTargetAtTime(basePitch, now, 0.07);
     this.oscSub.frequency.setTargetAtTime(basePitch * 0.5, now, 0.07);
     this.engineFilter.frequency.setTargetAtTime(filterFreq, now, 0.08);
     this.engineGain.gain.setTargetAtTime(targetGain, now, 0.08);
+
+    if (this.oscNitro && this.nitroGain) {
+      this.oscNitro.frequency.setTargetAtTime(220 + normalized * 280, now, 0.08);
+      this.nitroGain.gain.setTargetAtTime(nitroActive ? 0.055 : 0, now, 0.06);
+    }
   }
 
   public playClick(): void {
@@ -141,6 +197,76 @@ export class SoundEngine {
       osc.stop(now + 0.065);
     } catch {
       // Ignore audio scheduling error
+    }
+  }
+
+  public playCoinPickup(): void {
+    if (!this.ctx || !this.masterGain || this.muted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(987.77, now); // B5
+      osc.frequency.setValueAtTime(1318.51, now + 0.055); // E6
+
+      gain.gain.setValueAtTime(0.14, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + 0.17);
+    } catch {
+      // Ignore
+    }
+  }
+
+  public playRampJump(): void {
+    if (!this.ctx || !this.masterGain || this.muted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(220, now);
+      osc.frequency.exponentialRampToValueAtTime(560, now + 0.22);
+
+      gain.gain.setValueAtTime(0.16, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + 0.25);
+    } catch {
+      // Ignore
+    }
+  }
+
+  public playStuntBonus(): void {
+    if (!this.ctx || !this.masterGain || this.muted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const notes = [523.25, 659.25, 783.99, 1046.5];
+      notes.forEach((freq, idx) => {
+        if (!this.ctx || !this.masterGain) return;
+        const t = now + idx * 0.055;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, t);
+
+        gain.gain.setValueAtTime(0.14, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        osc.start(t);
+        osc.stop(t + 0.16);
+      });
+    } catch {
+      // Ignore
     }
   }
 
@@ -199,12 +325,13 @@ export class SoundEngine {
     try {
       const now = this.ctx.currentTime;
 
-      // Silence engine right away
       if (this.engineGain) {
         this.engineGain.gain.setTargetAtTime(0, now, 0.02);
       }
+      if (this.nitroGain) {
+        this.nitroGain.gain.setTargetAtTime(0, now, 0.02);
+      }
 
-      // Low impact thump
       const thump = this.ctx.createOscillator();
       const thumpGain = this.ctx.createGain();
       thump.type = 'sine';
@@ -219,7 +346,6 @@ export class SoundEngine {
       thump.start(now);
       thump.stop(now + 0.4);
 
-      // Metallic/gravel crunch noise burst
       if (this.noiseBuffer) {
         const noise = this.ctx.createBufferSource();
         noise.buffer = this.noiseBuffer;
@@ -249,6 +375,8 @@ export class SoundEngine {
     try {
       if (this.oscPrimary) this.oscPrimary.stop();
       if (this.oscSub) this.oscSub.stop();
+      if (this.oscNitro) this.oscNitro.stop();
+      if (this.rainSource) this.rainSource.stop();
       if (this.ctx && this.ctx.state !== 'closed') {
         void this.ctx.close();
       }
